@@ -10,8 +10,7 @@
 
 services:
   palsentry:
-    image: palsentry
-    build: .
+    image: '${PALSENTRY_IMAGE:-ghcr.io/wisdomsky/palsentry:latest}'
     restart: unless-stopped
     stop_grace_period: 30s
     read_only: true
@@ -21,20 +20,43 @@ services:
       - ALL
     tmpfs:
       - /tmp:size=32m,mode=1777
-    env_file:
-      - .env
 
     ports:
-      # Host port is configurable; the container always listens on 3000 so the mapping stays
-      # correct no matter what is set in .env.
       - '3000:3000'
 
     environment:
-      # Container invariants: do not expose these as host configuration because the port and data
-      # mount below depend on them.
+      # Container invariants: the port and data mount below depend on these values.
       PALSENTRY_PORT: '3000'
       PALSENTRY_HOST: '0.0.0.0'
       PALSENTRY_DATA_DIR: '/data'
+
+      # Required Palworld connection settings. Compose stops with a clear error when either value
+      # is missing. Export them from the shell/container manager or place them in an optional .env.
+      PALWORLD_REST_URL: '${PALWORLD_REST_URL:?PALWORLD_REST_URL is required}'
+      PALWORLD_ADMIN_PASSWORD: '${PALWORLD_ADMIN_PASSWORD:?PALWORLD_ADMIN_PASSWORD is required}'
+
+      # PalSentry defaults. Override these before exposing the dashboard beyond a trusted network.
+      PALSENTRY_LOGIN_USERNAME: '${PALSENTRY_LOGIN_USERNAME:-admin}'
+      PALSENTRY_LOGIN_PASSWORD: '${PALSENTRY_LOGIN_PASSWORD:-admin}'
+      PALSENTRY_LOGIN_PASSWORD_HASH: '${PALSENTRY_LOGIN_PASSWORD_HASH:-}'
+      PALSENTRY_SESSION_SECRET: '${PALSENTRY_SESSION_SECRET:-bb5930c05402c03f897c0cdd0e98bb8420a8359f7dbab25fe53df1a5c060d5ea}'
+      PALSENTRY_ALLOW_DESTRUCTIVE: '${PALSENTRY_ALLOW_DESTRUCTIVE:-true}'
+
+      # Optional settings are passed through as empty when unset. The application remains the
+      # source of truth for their defaults and validation.
+      PALSERVER_REST_USERNAME: '${PALSERVER_REST_USERNAME:-}'
+      PALSERVER_TIMEOUT_MS: '${PALSERVER_TIMEOUT_MS:-}'
+      PALSENTRY_SESSION_TTL_HOURS: '${PALSENTRY_SESSION_TTL_HOURS:-}'
+      PALSENTRY_TRUST_PROXY: '${PALSENTRY_TRUST_PROXY:-}'
+      PALSENTRY_SAMPLE_INTERVAL_SECONDS: '${PALSENTRY_SAMPLE_INTERVAL_SECONDS:-}'
+      PALSENTRY_HISTORY_RETENTION_DAYS: '${PALSENTRY_HISTORY_RETENTION_DAYS:-}'
+      PALSENTRY_RESTART_WAIT_SECONDS: '${PALSENTRY_RESTART_WAIT_SECONDS:-}'
+      PALSENTRY_RESTART_HEALTH_TIMEOUT_SECONDS: '${PALSENTRY_RESTART_HEALTH_TIMEOUT_SECONDS:-}'
+      PALSENTRY_RESTART_POLL_INTERVAL_MS: '${PALSENTRY_RESTART_POLL_INTERVAL_MS:-}'
+      PALSENTRY_MAP_TEXTURE_URL: '${PALSENTRY_MAP_TEXTURE_URL:-}'
+      PALSENTRY_WORLD_TREE_TEXTURE_URL: '${PALSENTRY_WORLD_TREE_TEXTURE_URL:-}'
+      PALSENTRY_MAP_PROJECTION: '${PALSENTRY_MAP_PROJECTION:-}'
+      LOG_LEVEL: '${LOG_LEVEL:-}'
 
     volumes:
       # Persists the ban registry, the audit trail, and metrics history across restarts.
