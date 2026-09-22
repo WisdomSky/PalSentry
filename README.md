@@ -93,14 +93,6 @@ The map keeps the selected player in view even when they travel long distances o
 
 PalSentry records where players are as it runs, so the map can be replayed instead of only showing the present. The **Wayback map** button on the Players tab opens the last 24 hours with every player PalSentry has seen — including the ones who logged off hours ago.
 
-- Scrub the datetime strip to preview any recorded moment, then click, tap, or use the arrow keys to hold one. The whole range is loaded once, so moving the pointer never issues a request.
-- Trails are drawn up to the selected moment and break across outages and region changes, so a line on the map only ever shows movement PalSentry actually observed.
-- Players who were not online at the selected moment stay on the map at their last known position, faded and labelled with when they were last seen.
-- Current guild bases can be added as context, marked as current rather than historical.
-- **Cancel Wayback map** returns to the live map with live tracking, bases, and pins exactly as they were.
-
-Recording continues while no dashboard is open, at a cadence chosen from the Players tab (5s, 15s, 30s, 1m, or 5m — 60s by default). The cadence is stored in the database, so it survives restarts, and it is independent of `PALSENTRY_SAMPLE_INTERVAL_SECONDS`. Detail costs storage: the default records about 1,400 positions per player per day, while 5 seconds records about 17,000.
-
 ![Wayback Mode](screenshots/3.3-livemap-replay.png)
 
 ### Enhanced Server Tools
@@ -249,10 +241,3 @@ docker pull wisdomsky/palsentry:latest
 ```
 
 Then recreate your container using the same `/data` volume. If you overrode `PALSENTRY_SESSION_SECRET`, reuse the same value to keep existing sessions valid.
-
-### Desktop app
-
-Windows and Linux builds check GitHub Releases shortly after launch and download a new version in the
-background. When one is ready, choose **Restart to update** from the tray or the application menu; you
-can also check by hand with **Check for updates…**. macOS builds are unsigned and therefore do not
-check for updates — download the new version from GitHub Releases and replace the app.
