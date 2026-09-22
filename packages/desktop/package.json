@@ -1,5 +1,5 @@
 {
-  "name": "@palsentry/desktop",
+  "name": "palsentrydesktop",
   "productName": "PalSentry",
   "desktopName": "palsentry.desktop",
   "version": "1.0.0",
