@@ -539,6 +539,29 @@ try {
     return `tray ready, version ${starting.version}`;
   });
 
+  await check('uses a native window frame, so the title bar drags and double-clicks', async () => {
+    const geometry = JSON.parse(
+      await mainEval(
+        inspectorPort,
+        "const win = req('electron').BrowserWindow.getAllWindows()[0]; return JSON.stringify({ outer: win.getBounds(), content: win.getContentBounds(), resizable: win.isResizable() });",
+      ),
+    );
+
+    assert(geometry.resizable, 'the window is not resizable');
+
+    // A hidden title bar makes the web content cover the whole window, leaving macOS nothing to drag
+    // or double-click. Comparing the window with its content area proves the frame is really there.
+    const chrome = geometry.outer.height - geometry.content.height;
+    if (process.platform === 'darwin') {
+      assert(
+        chrome >= 20,
+        `no native title bar: window is ${geometry.outer.height}px tall, its content ${geometry.content.height}px`,
+      );
+    }
+
+    return `${chrome}px of window chrome on ${process.platform}`;
+  });
+
   await check('keeps web content out of new windows', async () => {
     const opened = await rendererEval(
       rendererPort,

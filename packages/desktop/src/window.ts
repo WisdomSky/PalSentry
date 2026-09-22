@@ -57,8 +57,11 @@ export function createMainWindow(options: CreateWindowOptions): BrowserWindow {
     show: false,
     backgroundColor: WINDOW_BACKGROUND,
     title: 'PalSentry',
-    // Electron's own title bar on macOS looks native; Linux and Windows keep the default frame.
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    // Keep the native title bar on every platform, macOS included. Hiding it looks sleeker, but a
+    // window without one is only draggable through a CSS `app-region: drag` region, and macOS does
+    // not honour the system double-click action (zoom or minimize) in those regions, so the window
+    // could not be dragged or maximised the way every other Mac app can
+    // (https://github.com/electron/electron/issues/16385).
     webPreferences: {
       // No Node, no preload, no IPC: the renderer only speaks HTTP to the loopback server.
       nodeIntegration: false,
