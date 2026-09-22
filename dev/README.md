@@ -33,31 +33,30 @@ Common locations are:
 - Linux dedicated server: `Pal/Saved/Config/LinuxServer/PalWorldSettings.ini`
 - Windows dedicated server: `Pal/Saved/Config/WindowsServer/PalWorldSettings.ini`
 
-Restart Palworld after editing. Allow TCP port `8212` (or your chosen `RESTAPIPort`) **only from the machine/network where Palsentry runs**. Palworld authenticates REST requests with HTTP Basic Auth; its username is normally `admin` and its password is the configured `AdminPassword`.
+Restart Palworld after editing. Allow TCP port `8212` (or your chosen `RESTAPIPort`) **only from the machine/network where PalSentry runs**. Palworld authenticates REST requests with HTTP Basic Auth; its username is normally `admin` and its password is the configured `AdminPassword`.
 
 To show guild bases on the live map, also start the Palworld dedicated server with the opt-in `-enable-gamedata-api` launch argument. This is optional: without it, player maps and every other dashboard feature continue to work, and the map explains how to enable the base layer.
 
 ### 2. Configure PalSentry
 
-Generate a unique session secret:
-
-```sh
-openssl rand -hex 32
-```
-
-Then choose either configuration method.
+Only the Palworld connection values are required. Choose either configuration method.
 
 **Option A — Docker environment variables (no `.env` file):**
 
 ```sh
-export PALSERVER_API_URL=http://192.168.1.50:8212
-export PALSERVER_ADMIN_PASSWORD='the AdminPassword from PalWorldSettings.ini'
-export PALSENTRY_AUTH_USERNAME=admin
-export PALSENTRY_AUTH_PASSWORD='a separate Palsentry login password'
-export PALSENTRY_SESSION_SECRET='paste the openssl output here'
+export PALWORLD_REST_URL=http://192.168.1.50:8212
+export PALWORLD_ADMIN_PASSWORD='the AdminPassword from PalWorldSettings.ini'
 ```
 
 These exports apply to the current shell. Supply the same variables through your container manager when deploying from Portainer, a NAS UI, or another Docker platform.
+
+The built-in dashboard login is `admin` / `admin`, the session secret uses a shared default, and destructive actions are enabled. Override them before exposing PalSentry beyond a trusted local network:
+
+```sh
+export PALSENTRY_LOGIN_PASSWORD='a separate PalSentry login password'
+export PALSENTRY_SESSION_SECRET="$(openssl rand -hex 32)"
+export PALSENTRY_ALLOW_DESTRUCTIVE=false
+```
 
 **Option B — optional Compose `.env` file:**
 
@@ -65,7 +64,7 @@ These exports apply to the current shell. Supply the same variables through your
 cp .env.example .env
 ```
 
-Edit `.env` and fill in the required values shown above. The file is ignored by Git; do not commit or share it. Single-quote secrets, especially password hashes or values containing `$` or `#`.
+Edit `.env` and fill in the required Palworld values. The template includes the PalSentry defaults and recommended security guidance. The file is ignored by Git; do not commit or share it. Single-quote custom secrets, especially password hashes or values containing `$` or `#`.
 
 ### 3. Start it
 
@@ -75,9 +74,7 @@ docker compose up -d
 docker compose ps
 ```
 
-Open <http://localhost:3000> and sign in with `PALSENTRY_AUTH_USERNAME` and your dashboard password.
-
-The default bind address is `127.0.0.1`. To serve a trusted LAN or VPN, set `PALSENTRY_BIND_ADDRESS` to that interface's address (or `0.0.0.0` only when a firewall restricts access). Change `PALSENTRY_HOST_PORT` if port 3000 is occupied.
+Open <http://localhost:3000> and sign in with `PALSENTRY_LOGIN_USERNAME` and your dashboard password.
 
 Useful commands:
 
@@ -88,7 +85,7 @@ docker compose pull && docker compose up -d  # update the published image
 docker compose down                           # keeps everything in ./data
 ```
 
-Palsentry stores its database in the host's `./data` directory. Stop the service before backing up that directory. Deleting it permanently removes the player roster, bans, audit records, and metrics history.
+PalSentry stores its database in the host's `./data` directory. Stop the service before backing up that directory. Deleting it permanently removes the player roster, bans, audit records, and metrics history.
 
 To build the production image from this checkout instead of pulling it:
 
@@ -96,13 +93,13 @@ To build the production image from this checkout instead of pulling it:
 docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```
 
-`GET /api/health` is public and reports Palsentry liveness only. The Docker healthcheck deliberately remains healthy when Palworld is offline.
+`GET /api/health` is public and reports PalSentry liveness only. The Docker healthcheck deliberately remains healthy when Palworld is offline.
 
 ## Authentication and safety
 
 ### Use a password hash instead of plaintext
 
-The plaintext option is convenient, but Palsentry can use an scrypt hash supplied through the Docker environment or `.env`:
+The default dashboard credentials are `admin` / `admin`. Change them before exposing the dashboard. The plaintext option is convenient, but PalSentry can use an scrypt hash supplied through the Docker environment or `.env`:
 
 ```sh
 npm run hash-password
@@ -115,7 +112,7 @@ docker run --rm -it --entrypoint node ghcr.io/wisdomsky/palsentry:latest \
   packages/server/scripts/hash-password.mjs
 ```
 
-Put the emitted `PALSENTRY_AUTH_PASSWORD_HASH='scrypt$…$…'` value in `.env` or export it with single quotes, remove/unset `PALSENTRY_AUTH_PASSWORD`, and recreate the container:
+Put the emitted `PALSENTRY_LOGIN_PASSWORD_HASH='scrypt$…$…'` value in `.env` or export it with single quotes, clear any custom `PALSENTRY_LOGIN_PASSWORD`, and recreate the container. The hash takes precedence over the built-in `admin` password:
 
 ```sh
 docker compose up -d --force-recreate
@@ -125,13 +122,13 @@ If both values are present, the hash wins. Login attempts are limited to 10 per 
 
 ### Destructive-action gate
 
-Palsentry starts in safe mode:
+PalSentry starts with destructive actions enabled:
 
 ```dotenv
-PALSENTRY_ALLOW_DESTRUCTIVE=false
+PALSENTRY_ALLOW_DESTRUCTIVE=true
 ```
 
-Broadcast and save are available, while kick, ban, unban, shutdown, stop, and restart return HTTP `403` and are disabled in the UI. Set the flag to `true` and recreate the container to enable them. The UI still requires a confirmation dialog. This gate is independent of login authentication.
+Kick, ban, unban, shutdown, stop, and restart are available by default, and the UI still requires a confirmation dialog. Set the flag to `false` and recreate the container to disable those actions at both the API and UI layers. Broadcast and save remain available. This gate is independent of login authentication.
 
 ### Reverse proxies and HTTPS
 
@@ -141,7 +138,7 @@ If this flag is enabled while you browse over plain HTTP, login appears not to s
 
 ## Restarting the game server
 
-Palworld's REST API has shutdown and stop endpoints, but **no restart endpoint**. Palsentry implements restart as:
+Palworld's REST API has shutdown and stop endpoints, but **no restart endpoint**. PalSentry implements restart as:
 
 1. announce the countdown;
 2. save the world;
@@ -149,7 +146,7 @@ Palworld's REST API has shutdown and stop endpoints, but **no restart endpoint**
 4. wait for the game process to stop; and
 5. poll until a new process is healthy.
 
-The **Palworld game container**, not merely the Palsentry container, must therefore have:
+The **Palworld game container**, not merely the PalSentry container, must therefore have:
 
 ```yaml
 services:
@@ -157,28 +154,28 @@ services:
     restart: unless-stopped
 ```
 
-Palsentry never mounts the Docker socket and cannot start a stopped container directly. It recognizes a completed restart by observing an offline/online transition or a reset in Palworld's uptime. If the process does not return within `PALSENTRY_RESTART_HEALTH_TIMEOUT_SECONDS`, the UI gives a clean failure with a restart-policy hint.
+PalSentry never mounts the Docker socket and cannot start a stopped container directly. It recognizes a completed restart by observing an offline/online transition or a reset in Palworld's uptime. If the process does not return within `PALSENTRY_RESTART_HEALTH_TIMEOUT_SECONDS`, the UI gives a clean failure with a restart-policy hint.
 
 Always test this once while players are not relying on the server.
 
 ## Data and API limitations
 
-Palsentry stores `/data/palsentry.db` in the host's `./data` bind-mounted directory using SQLite WAL mode. It contains:
+PalSentry stores `/data/palsentry.db` in the host's `./data` bind-mounted directory using SQLite WAL mode. It contains:
 
-- the Palsentry-created ban registry;
+- the PalSentry-created ban registry;
 - the immutable action audit trail;
 - sampled metrics history; and
 - the player roster described under **Players** below.
 
-Palworld exposes no endpoint for listing bans. Consequently, Palsentry cannot discover bans issued before it was installed or through the game console. You can still use **Bans → Unban by player id**, and the UI clearly distinguishes its own registry from the game server's actual ban list. Player actions always target Palworld's `userid`, never a potentially duplicated display name.
+Palworld exposes no endpoint for listing bans. Consequently, PalSentry cannot discover bans issued before it was installed or through the game console. You can still use **Bans → Unban by player id**, and the UI clearly distinguishes its own registry from the game server's actual ban list. Player actions always target Palworld's `userid`, never a potentially duplicated display name.
 
-Palworld exposes only a point-in-time metrics snapshot. Palsentry creates history by polling and retains it for `PALSENTRY_HISTORY_RETENTION_DAYS` (30 by default). A new installation therefore has no historical chart data until samples accumulate.
+Palworld exposes only a point-in-time metrics snapshot. PalSentry creates history by polling and retains it for `PALSENTRY_HISTORY_RETENTION_DAYS` (30 by default). A new installation therefore has no historical chart data until samples accumulate.
 
-The same is true of `/players`, which lists only who is connected at the moment it is called. Palsentry keeps its own roster rather than trusting that endpoint as a history, for the reasons in the next section.
+The same is true of `/players`, which lists only who is connected at the moment it is called. PalSentry keeps its own roster rather than trusting that endpoint as a history, for the reasons in the next section.
 
 ## Players
 
-**Players** lists everyone Palsentry has ever seen, not just who is connected right now. Palworld's `/players` endpoint forgets a player the moment they disconnect, so the roster is Palsentry's own table, observed in the background at `PALSENTRY_SAMPLE_INTERVAL_SECONDS` (60s by default) — players who connect and leave between two page views are still recorded.
+**Players** lists everyone PalSentry has ever seen, not just who is connected right now. Palworld's `/players` endpoint forgets a player the moment they disconnect, so the roster is PalSentry's own table, observed in the background at `PALSENTRY_SAMPLE_INTERVAL_SECONDS` (60s by default) — players who connect and leave between two page views are still recorded.
 
 Each row carries a **Last online** column, immediately before the actions:
 
@@ -225,7 +222,7 @@ While following:
 
 The map plots raw Unreal coordinates on separate **Palpagos** and **World Tree** surfaces. Both 8192×8192 textures are bundled with the SPA, so the map works without a runtime dependency on a third-party host. They were sourced from the [PalworldSaveTools](https://github.com/deafdudecomputers/PalworldSaveTools) project; provenance and checksums are recorded in [`packages/web/public/maps/README.md`](packages/web/public/maps/README.md).
 
-Palworld, its artwork, and game data are owned by Pocketpair. Bundling these derived textures does not place them under Palsentry's AGPLv3 license, and this project is not affiliated with or endorsed by Pocketpair.
+Palworld, its artwork, and game data are owned by Pocketpair. Bundling these derived textures does not place them under PalSentry's AGPLv3 license, and this project is not affiliated with or endorsed by Pocketpair.
 
 The map view keeps independent pan/zoom state for each region while it is open. Calibration settings are also per region and are saved only in that browser. The map supports mouse/touch drag, cursor-centered wheel zoom, pinch zoom, keyboard arrows and `+`/`-`, and explicit zoom/Fit controls. If either texture fails to load, only that region falls back to its interactive coordinate grid.
 
@@ -300,7 +297,7 @@ npm run build
 npm run test:smoke
 ```
 
-The smoke test starts a real mock API plus the built Palsentry process on ephemeral test data and covers login, protected reads (including `/api/history`), metrics history presets and custom ranges, actions, ban history, restart recovery, audit records, SPA deep links, and game-server outage handling.
+The smoke test starts a real mock API plus the built PalSentry process on ephemeral test data and covers login, protected reads (including `/api/history`), metrics history presets and custom ranges, actions, ban history, restart recovery, audit records, SPA deep links, and game-server outage handling.
 
 ## Publishing containers (maintainers)
 
@@ -317,7 +314,7 @@ No separate GHCR token is needed. Publishing with `GITHUB_TOKEN` links the packa
 
 ## Troubleshooting
 
-### Palsentry starts but reports Palworld offline
+### PalSentry starts but reports Palworld offline
 
 - Confirm `RESTAPIEnabled=True` and restart Palworld after changing the INI.
 - Use the game host's LAN/VPN IP, not `localhost`, from Docker.
@@ -330,7 +327,7 @@ Set or export `PALSENTRY_ALLOW_DESTRUCTIVE=true`, then run `docker compose up -d
 
 ### Restart times out
 
-Ensure the **Palworld** service uses `restart: unless-stopped` and that its process actually exits after `/shutdown`. Check the game container's logs. Palsentry's own `restart: unless-stopped` setting does not restart Palworld.
+Ensure the **Palworld** service uses `restart: unless-stopped` and that its process actually exits after `/shutdown`. Check the game container's logs. PalSentry's own `restart: unless-stopped` setting does not restart Palworld.
 
 ### Login succeeds, then immediately returns to login
 
@@ -353,4 +350,4 @@ Browser ── same-origin HTTP ──> Fastify + Vue static files ── Basic 
 - **Backend:** Node.js, Fastify 5, TypeScript, better-sqlite3
 - **Deployment:** multi-platform `node:22-slim` image for AMD64/ARM64, non-root UID 1001, read-only root filesystem, all Linux capabilities dropped
 
-The app intentionally manages one Palworld server configured through environment variables. Core monitoring and administration use Palworld's documented REST endpoints; the map optionally reads the documented, opt-in `/game-data` snapshot for guild bases. Palsentry does not depend on RCON, Docker-socket access, or undocumented teleport/item APIs.
+The app intentionally manages one Palworld server configured through environment variables. Core monitoring and administration use Palworld's documented REST endpoints; the map optionally reads the documented, opt-in `/game-data` snapshot for guild bases. PalSentry does not depend on RCON, Docker-socket access, or undocumented teleport/item APIs.

@@ -115,8 +115,8 @@ describe('authentication', () => {
   });
 
   it('rejects a session issued for a different username', async () => {
-    // Valid signature, wrong user — happens after PALSENTRY_AUTH_USERNAME is changed.
-    const other = await makeApp({ env: { PALSENTRY_AUTH_USERNAME: 'someone-else' } });
+    // Valid signature, wrong user — happens after PALSENTRY_LOGIN_USERNAME is changed.
+    const other = await makeApp({ env: { PALSENTRY_LOGIN_USERNAME: 'someone-else' } });
     const otherCookie = await signIn(other.app, 'someone-else');
 
     const { app } = await makeApp();
@@ -267,7 +267,7 @@ describe('POST /api/auth/login', () => {
     const hash = hashPassword('hash-only-password');
 
     const { app } = await makeApp({
-      env: { PALSENTRY_AUTH_PASSWORD: undefined, PALSENTRY_AUTH_PASSWORD_HASH: hash },
+      env: { PALSENTRY_LOGIN_PASSWORD: undefined, PALSENTRY_LOGIN_PASSWORD_HASH: hash },
     });
 
     const ok = await app.inject({
@@ -403,7 +403,7 @@ describe('GET /api/meta', () => {
     assert.equal(response.statusCode, 200);
 
     const body = response.json<MetaResponse>();
-    assert.equal(body.destructiveAllowed, false, 'destructive actions default to off');
+    assert.equal(body.destructiveAllowed, true, 'destructive actions default to on');
     assert.equal(body.map.projection, DEFAULT_MAP_PROJECTION);
     assert.equal(body.map.layers.palpagos.textureUrl, DEFAULT_MAP_TEXTURE_URL);
     assert.equal(body.map.layers.worldTree.textureUrl, DEFAULT_WORLD_TREE_TEXTURE_URL);
@@ -413,12 +413,12 @@ describe('GET /api/meta', () => {
     assert.equal(body.restart.defaultWaitSeconds, 30);
   });
 
-  it('reflects PALSENTRY_ALLOW_DESTRUCTIVE', async () => {
-    const { app } = await makeApp({ env: { PALSENTRY_ALLOW_DESTRUCTIVE: 'true' } });
+  it('reflects a disabled PALSENTRY_ALLOW_DESTRUCTIVE override', async () => {
+    const { app } = await makeApp({ env: { PALSENTRY_ALLOW_DESTRUCTIVE: 'false' } });
     const cookie = await signIn(app);
 
     const response = await app.inject({ method: 'GET', url: '/api/meta', headers: { cookie } });
-    assert.equal(response.json<MetaResponse>().destructiveAllowed, true);
+    assert.equal(response.json<MetaResponse>().destructiveAllowed, false);
   });
 
   it('reports configured map textures and projection', async () => {
@@ -494,7 +494,7 @@ describe('GET /api/status', () => {
 
   it('reports a credential problem distinctly from an unreachable server', async () => {
     const { app } = await makeApp({
-      env: { PALSERVER_ADMIN_PASSWORD: 'the-wrong-palworld-password' },
+      env: { PALWORLD_ADMIN_PASSWORD: 'the-wrong-palworld-password' },
     });
     const cookie = await signIn(app);
 
@@ -504,7 +504,7 @@ describe('GET /api/status', () => {
 
     assert.equal(body.online, false);
     assert.equal(body.error?.code, 'palworld_error');
-    assert.match(body.error?.message ?? '', /PALSERVER_ADMIN_PASSWORD/);
+    assert.match(body.error?.message ?? '', /PALWORLD_ADMIN_PASSWORD/);
   });
 });
 

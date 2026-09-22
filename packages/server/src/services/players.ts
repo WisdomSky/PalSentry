@@ -9,7 +9,7 @@ import type { PalworldClient } from '../palworld/client.js';
  *
  * Palworld's `/players` endpoint answers "who is connected right now?" and nothing more —
  * disconnect and the account vanishes from every response. That is enough for a live view and
- * useless for anything historical, so Palsentry keeps its own roster of everyone it has observed
+ * useless for anything historical, so PalSentry keeps its own roster of everyone it has observed
  * and remembers when each of them was last online.
  *
  * Two deliberate consequences:

@@ -1,16 +1,17 @@
-# Palsentry — Palworld server management dashboard
+# PalSentry — Palworld server management dashboard
 #
-#   Option A: export the required variables in your shell or Docker environment.
-#   Option B: cp .env.example .env, then fill in the required values.
+#   Option A: export the required Palworld variables in your shell or Docker environment.
+#   Option B: cp .env.example .env, then fill in the required Palworld values.
 #   docker compose up -d
 #   open http://localhost:3000
 #
-# Shell variables take precedence over the optional local .env file. Palsentry connects *out* to
+# Shell variables take precedence over the optional local .env file. PalSentry connects *out* to
 # your existing Palworld server; it does not run the game server.
 
 services:
   palsentry:
-    image: '${PALSENTRY_IMAGE:-ghcr.io/wisdomsky/palsentry:latest}'
+    image: palsentry
+    build: .
     restart: unless-stopped
     stop_grace_period: 30s
     read_only: true
@@ -20,11 +21,13 @@ services:
       - ALL
     tmpfs:
       - /tmp:size=32m,mode=1777
+    env_file:
+      - .env
 
     ports:
       # Host port is configurable; the container always listens on 3000 so the mapping stays
       # correct no matter what is set in .env.
-      - '${PALSENTRY_BIND_ADDRESS:-127.0.0.1}:${PALSENTRY_HOST_PORT:-3000}:3000'
+      - '3000:3000'
 
     environment:
       # Container invariants: do not expose these as host configuration because the port and data
@@ -32,33 +35,6 @@ services:
       PALSENTRY_PORT: '3000'
       PALSENTRY_HOST: '0.0.0.0'
       PALSENTRY_DATA_DIR: '/data'
-
-      # Required connection and session settings. Compose stops with a clear message when one is
-      # missing. Set either PALSENTRY_AUTH_PASSWORD or PALSENTRY_AUTH_PASSWORD_HASH as well; the
-      # application validates that cross-field choice at startup.
-      PALSERVER_API_URL: '${PALSERVER_API_URL:?PALSERVER_API_URL is required}'
-      PALSERVER_ADMIN_PASSWORD: '${PALSERVER_ADMIN_PASSWORD:?PALSERVER_ADMIN_PASSWORD is required}'
-      PALSENTRY_SESSION_SECRET: '${PALSENTRY_SESSION_SECRET:?PALSENTRY_SESSION_SECRET is required}'
-      PALSENTRY_AUTH_PASSWORD: '${PALSENTRY_AUTH_PASSWORD:-}'
-      PALSENTRY_AUTH_PASSWORD_HASH: '${PALSENTRY_AUTH_PASSWORD_HASH:-}'
-
-      # Optional settings are passed through as empty when unset. The application's config parser
-      # remains the single source of truth for defaults and validation.
-      PALSERVER_REST_USERNAME: '${PALSERVER_REST_USERNAME:-}'
-      PALSERVER_TIMEOUT_MS: '${PALSERVER_TIMEOUT_MS:-}'
-      PALSENTRY_AUTH_USERNAME: '${PALSENTRY_AUTH_USERNAME:-}'
-      PALSENTRY_SESSION_TTL_HOURS: '${PALSENTRY_SESSION_TTL_HOURS:-}'
-      PALSENTRY_TRUST_PROXY: '${PALSENTRY_TRUST_PROXY:-}'
-      PALSENTRY_ALLOW_DESTRUCTIVE: '${PALSENTRY_ALLOW_DESTRUCTIVE:-}'
-      PALSENTRY_SAMPLE_INTERVAL_SECONDS: '${PALSENTRY_SAMPLE_INTERVAL_SECONDS:-}'
-      PALSENTRY_HISTORY_RETENTION_DAYS: '${PALSENTRY_HISTORY_RETENTION_DAYS:-}'
-      PALSENTRY_RESTART_WAIT_SECONDS: '${PALSENTRY_RESTART_WAIT_SECONDS:-}'
-      PALSENTRY_RESTART_HEALTH_TIMEOUT_SECONDS: '${PALSENTRY_RESTART_HEALTH_TIMEOUT_SECONDS:-}'
-      PALSENTRY_RESTART_POLL_INTERVAL_MS: '${PALSENTRY_RESTART_POLL_INTERVAL_MS:-}'
-      PALSENTRY_MAP_TEXTURE_URL: '${PALSENTRY_MAP_TEXTURE_URL:-}'
-      PALSENTRY_WORLD_TREE_TEXTURE_URL: '${PALSENTRY_WORLD_TREE_TEXTURE_URL:-}'
-      PALSENTRY_MAP_PROJECTION: '${PALSENTRY_MAP_PROJECTION:-}'
-      LOG_LEVEL: '${LOG_LEVEL:-}'
 
     volumes:
       # Persists the ban registry, the audit trail, and metrics history across restarts.
@@ -68,7 +44,7 @@ services:
       # PALSENTRY_MAP_TEXTURE_URL and/or PALSENTRY_WORLD_TREE_TEXTURE_URL to paths under /map.
       # - ./map:/app/packages/server/dist/public/map:ro
 
-    # The healthcheck is defined in the Dockerfile. It only checks Palsentry itself, so an
+    # The healthcheck is defined in the Dockerfile. It only checks PalSentry itself, so an
     # offline Palworld server will not mark the dashboard unhealthy.
 
     logging:

@@ -95,5 +95,5 @@ router.beforeEach(async (to) => {
 
 router.afterEach((to) => {
   const title = typeof to.meta.title === 'string' ? to.meta.title : null;
-  document.title = title === null ? 'Palsentry' : `${title} · Palsentry`;
+  document.title = title === null ? 'PalSentry' : `${title} · PalSentry`;
 });

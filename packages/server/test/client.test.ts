@@ -264,7 +264,7 @@ describe('PalworldClient error mapping', () => {
       () => clientFor(stub, { password: 'wrong' }).info(),
       'unauthorized',
     );
-    assert.match(error.message, /PALSERVER_ADMIN_PASSWORD/);
+    assert.match(error.message, /PALWORLD_ADMIN_PASSWORD/);
     assert.equal(error.status, 401);
     assert.equal(error.apiCode, 'palworld_error');
     assert.equal(error.retryable, false);

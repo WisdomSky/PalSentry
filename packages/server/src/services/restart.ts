@@ -264,7 +264,7 @@ export class RestartService {
         throw new PalworldError({
           kind: 'timeout',
           endpoint: 'restart',
-          message: 'The restart was cancelled because Palsentry is shutting down.',
+          message: 'The restart was cancelled because PalSentry is shutting down.',
         });
       }
 

@@ -22,7 +22,7 @@ import type {
   UnbanRequest,
 } from '@palsentry/shared';
 
-/** An error returned by the Palsentry API, carrying the machine-readable code. */
+/** An error returned by the PalSentry API, carrying the machine-readable code. */
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
@@ -93,11 +93,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       },
     });
   } catch (error) {
-    // A network-level failure: the Palsentry server itself is unreachable.
+    // A network-level failure: the PalSentry server itself is unreachable.
     throw new ApiError(
       0,
       'unreachable',
-      'Could not reach the Palsentry server. Check that the container is running.',
+      'Could not reach the PalSentry server. Check that the container is running.',
       { ...(error === undefined ? {} : {}) },
     );
   }

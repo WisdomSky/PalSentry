@@ -176,7 +176,7 @@ const ACTION_CHOICES = [
         :description="
           activeFilterCount > 0
             ? 'Try widening or clearing the filters.'
-            : 'Every action Palsentry performs — successful or not — is recorded here.'
+            : 'Every action PalSentry performs — successful or not — is recorded here.'
         "
       >
         <template #icon

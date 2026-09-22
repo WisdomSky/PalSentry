@@ -5,11 +5,11 @@ import type { Db } from '../db/index.js';
  * The ban registry.
  *
  * The Palworld REST API can ban and unban but has **no endpoint to list existing bans** (the
- * authoritative list lives in `Pal/Saved/SaveGames/banlist.txt` on the server). Palsentry
+ * authoritative list lives in `Pal/Saved/SaveGames/banlist.txt` on the server). PalSentry
  * therefore keeps its own record of every ban it issues, which is what the Bans view shows.
  *
  * Consequences worth being explicit about:
- * - Bans issued from the in-game admin console or before Palsentry existed are **not** listed.
+ * - Bans issued from the in-game admin console or before PalSentry existed are **not** listed.
  *   Unbanning one of those requires pasting the player id, which the UI supports.
  * - Deleting a row here only forgets the bookkeeping; it does not unban anyone. Unbanning goes
  *   through the Palworld API (see `markUnbanned`, called after a successful upstream `/unban`).
@@ -99,7 +99,7 @@ export class BanService {
    * Close the active ban episode for a player.
    *
    * Returns true when a row was updated. A false result is not an error: it means the ban was
-   * never issued through Palsentry (for example via the in-game console), which the caller
+   * never issued through PalSentry (for example via the in-game console), which the caller
    * should still report as a successful unban.
    */
   markUnbanned(userid: string, actorIp: string | null): boolean {

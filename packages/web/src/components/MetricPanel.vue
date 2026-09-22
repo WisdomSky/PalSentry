@@ -99,7 +99,7 @@ const isEmpty = computed(() => response.value !== null && response.value.samples
         v-else-if="isEmpty"
         class="rounded-lg border border-dashed border-slate-300 px-3 py-6 text-center text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400"
       >
-        No samples in this range. Palsentry records one every
+        No samples in this range. PalSentry records one every
         {{ sampleIntervalSeconds }}s.
       </p>
 

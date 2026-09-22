@@ -202,7 +202,7 @@ export class PalworldClient {
         body,
         message:
           'The Palworld server rejected the API credentials. ' +
-          'Check that PALSERVER_ADMIN_PASSWORD matches AdminPassword in PalWorldSettings.ini.',
+          'Check that PALWORLD_ADMIN_PASSWORD matches AdminPassword in PalWorldSettings.ini.',
       });
     }
 
@@ -224,7 +224,7 @@ export class PalworldClient {
         body,
         message:
           `The Palworld server has no endpoint at ${endpoint}. ` +
-          `Check that PALSERVER_API_URL points at the REST API port (RESTAPIPort, usually 8212) and that your server version supports this call.`,
+          `Check that PALWORLD_REST_URL points at the REST API port (RESTAPIPort, usually 8212) and that your server version supports this call.`,
       });
     }
 
@@ -279,7 +279,7 @@ export class PalworldClient {
         endpoint: this.url('/info'),
         message:
           'The Palworld server returned an unexpected response for /info. ' +
-          'This usually means PALSERVER_API_URL points at something that is not the Palworld REST API.',
+          'This usually means PALWORLD_REST_URL points at something that is not the Palworld REST API.',
       });
     }
     return info;

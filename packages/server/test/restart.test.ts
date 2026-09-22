@@ -135,7 +135,7 @@ describe('POST /api/restart', () => {
   });
 
   it('is gated by PALSENTRY_ALLOW_DESTRUCTIVE', async () => {
-    const { app, stub } = await makeApp();
+    const { app, stub } = await makeApp({ env: { PALSENTRY_ALLOW_DESTRUCTIVE: 'false' } });
     const cookie = await signIn(app);
 
     const response = await app.inject({
@@ -432,7 +432,7 @@ describe('restart sequence', () => {
     const settled = await waitForSettled(service);
 
     assert.equal(settled.state, 'failed');
-    assert.match(settled.error ?? '', /PALSERVER_ADMIN_PASSWORD/);
+    assert.match(settled.error ?? '', /PALWORLD_ADMIN_PASSWORD/);
   });
 
   it('is resettable — a restart can succeed after an earlier one failed', async () => {

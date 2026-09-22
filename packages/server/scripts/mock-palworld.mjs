@@ -2,7 +2,7 @@
 /**
  * A mock Palworld dedicated-server REST API.
  *
- * Purpose: let you run and evaluate Palsentry without a Palworld server, and exercise the restart
+ * Purpose: let you run and evaluate PalSentry without a Palworld server, and exercise the restart
  * flow end to end (the mock actually goes offline and comes back, so the state machine has
  * something real to detect).
  *
@@ -16,9 +16,9 @@
  *   MOCK_TELEPORT_USER=USER-DAVE MOCK_TELEPORT_EVERY=1 node packages/server/scripts/mock-palworld.mjs
  *   MOCK_DROP_USER=USER-ALICE MOCK_DROP_USER_AFTER_SECONDS=30 node packages/server/scripts/mock-palworld.mjs
  *
- * Then point Palsentry at it:
- *   PALSERVER_API_URL=http://127.0.0.1:8212
- *   PALSERVER_ADMIN_PASSWORD=secret
+ * Then point PalSentry at it:
+ *   PALWORLD_REST_URL=http://127.0.0.1:8212
+ *   PALWORLD_ADMIN_PASSWORD=secret
  */
 import http from 'node:http';
 
@@ -261,8 +261,8 @@ const server = http.createServer((req, res) => {
       case '/v1/api/info':
         send(res, 200, {
           version: 'v1.0.4-mock',
-          servername: 'Palsentry Mock Server',
-          description: 'A mock Palworld server for trying out Palsentry.',
+          servername: 'PalSentry Mock Server',
+          description: 'A mock Palworld server for trying out PalSentry.',
           worldguid: worldGuid,
         });
         return;
@@ -329,8 +329,8 @@ const server = http.createServer((req, res) => {
           WorkSpeedRate: 1,
           CoopPlayerMaxNum: 4,
           ServerPlayerMaxNum: 32,
-          ServerName: 'Palsentry Mock Server',
-          ServerDescription: 'A mock Palworld server for trying out Palsentry.',
+          ServerName: 'PalSentry Mock Server',
+          ServerDescription: 'A mock Palworld server for trying out PalSentry.',
           PublicPort: 8211,
           PublicIP: '',
           RCONEnabled: false,
@@ -417,7 +417,7 @@ function safeParse(text) {
 /**
  * Simulate the container restart policy: drop the server, then bring it back.
  *
- * Coming back resets `uptime`, which is exactly the signal Palsentry's restart detector looks for
+ * Coming back resets `uptime`, which is exactly the signal PalSentry's restart detector looks for
  * when the downtime is too short to observe.
  */
 function scheduleRestart(delayMs) {
@@ -450,7 +450,7 @@ server.listen(PORT, HOST, () => {
   if (DROP_USER !== '' && DROP_USER_AFTER_SECONDS > 0) {
     log(`scripted drop: ${DROP_USER} leaves the roster after ${DROP_USER_AFTER_SECONDS}s`);
   }
-  log('point Palsentry at this with PALSERVER_API_URL=http://127.0.0.1:' + PORT);
+  log('point PalSentry at this with PALWORLD_REST_URL=http://127.0.0.1:' + PORT);
 });
 
 for (const signal of ['SIGINT', 'SIGTERM']) {

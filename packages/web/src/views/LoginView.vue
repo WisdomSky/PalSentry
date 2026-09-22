@@ -122,8 +122,8 @@ async function submit(): Promise<void> {
 
       <!--      <p class="mt-4 text-center text-xs text-slate-400 dark:text-slate-500">-->
       <!--        Credentials are configured with-->
-      <!--        <code class="font-mono">PALSENTRY_AUTH_USERNAME</code> and-->
-      <!--        <code class="font-mono">PALSENTRY_AUTH_PASSWORD_HASH</code>.-->
+      <!--        <code class="font-mono">PALSENTRY_LOGIN_USERNAME</code> and-->
+      <!--        <code class="font-mono">PALSENTRY_LOGIN_PASSWORD_HASH</code>.-->
       <!--      </p>-->
     </div>
   </div>

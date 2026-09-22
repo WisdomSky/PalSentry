@@ -26,7 +26,7 @@ const MIGRATIONS: readonly Migration[] = [
     up: (db) => {
       db.exec(`
         -- Ban registry. The Palworld REST API can ban and unban but cannot list bans, so this
-        -- table is the dashboard's source of truth for bans issued through Palsentry.
+        -- table is the dashboard's source of truth for bans issued through PalSentry.
         CREATE TABLE bans (
           id                INTEGER PRIMARY KEY AUTOINCREMENT,
           userid            TEXT    NOT NULL,
@@ -50,7 +50,7 @@ const MIGRATIONS: readonly Migration[] = [
           ON bans(userid) WHERE active = 1;
 
         -- Append-only audit trail. Retained indefinitely: rows are small and the history is
-        -- the point. There is no actor user id because Palsentry is single-operator; the
+        -- the point. There is no actor user id because PalSentry is single-operator; the
         -- session username and source IP are recorded instead.
         CREATE TABLE audit (
           id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -89,7 +89,7 @@ const MIGRATIONS: readonly Migration[] = [
     name: 'durable player roster',
     up: (db) => {
       db.exec(`
-        -- Every player Palsentry has seen. The live /players endpoint only reports who is
+        -- Every player PalSentry has seen. The live /players endpoint only reports who is
         -- connected right now, so without this table the Players tab forgets people the moment
         -- they disconnect and only ever shows whoever happens to be online.
         --
@@ -135,7 +135,7 @@ export function runMigrations(db: Db, logger: Logger): void {
   if (current > SCHEMA_VERSION) {
     throw new Error(
       `Database schema version ${current} is newer than this build supports (${SCHEMA_VERSION}). ` +
-        'This usually means the container was downgraded. Use a newer Palsentry image, or restore ' +
+        'This usually means the container was downgraded. Use a newer PalSentry image, or restore ' +
         'a backup taken with the older version.',
     );
   }

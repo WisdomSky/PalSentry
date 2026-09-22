@@ -4,7 +4,7 @@ import type { Db } from '../db/index.js';
 /**
  * Append-only audit trail.
  *
- * Every action Palsentry performs against the Palworld API is recorded, successful or not —
+ * Every action PalSentry performs against the Palworld API is recorded, successful or not —
  * the failures are often the interesting ones ("I pressed restart and nothing happened").
  * Rows are never updated or deleted, so the trail cannot be quietly rewritten from the UI.
  */

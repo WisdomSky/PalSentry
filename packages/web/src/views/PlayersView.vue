@@ -118,7 +118,7 @@ function showInMap(player: EnrichedPlayer): void {
         :description="
           server.playerSnapshotAvailable
             ? 'Players are remembered here from their first connection, and stay after they leave.'
-            : 'Start the Palworld server, or check PALSERVER_API_URL and that RESTAPIEnabled=True.'
+            : 'Start the Palworld server, or check PALWORLD_REST_URL and that RESTAPIEnabled=True.'
         "
       >
         <template #icon>

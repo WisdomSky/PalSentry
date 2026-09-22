@@ -5,16 +5,17 @@ import {
   DEFAULT_MAP_TEXTURE_URL,
   DEFAULT_WORLD_TREE_TEXTURE_URL,
 } from '@palsentry/shared';
+import { verifyPassword } from '../src/auth/password.js';
 import { ConfigError, loadConfig } from '../src/config.js';
 
 /** A minimal, valid environment. Individual tests override single keys. */
 function validEnv(overrides: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
   return {
     NODE_ENV: 'test',
-    PALSERVER_API_URL: 'http://192.168.1.50:8212',
-    PALSERVER_ADMIN_PASSWORD: 'palworld-admin-password',
-    PALSENTRY_AUTH_USERNAME: 'admin',
-    PALSENTRY_AUTH_PASSWORD: 'palsentry-admin-password',
+    PALWORLD_REST_URL: 'http://192.168.1.50:8212',
+    PALWORLD_ADMIN_PASSWORD: 'palworld-admin-password',
+    PALSENTRY_LOGIN_USERNAME: 'admin',
+    PALSENTRY_LOGIN_PASSWORD: 'palsentry-admin-password',
     PALSENTRY_SESSION_SECRET: 'a'.repeat(48),
     ...overrides,
   };
@@ -42,7 +43,7 @@ describe('loadConfig', () => {
     assert.equal(config.auth.username, 'admin');
     assert.equal(config.auth.sessionTtlHours, 12);
     assert.equal(config.auth.secureCookies, false);
-    assert.equal(config.allowDestructive, false, 'destructive actions are opt-in');
+    assert.equal(config.allowDestructive, true, 'destructive actions are enabled by default');
     assert.equal(config.history.retentionDays, 30);
     assert.equal(config.history.sampleIntervalSeconds, 60);
     assert.equal(config.map.projection, DEFAULT_MAP_PROJECTION);
@@ -53,78 +54,94 @@ describe('loadConfig', () => {
 
   describe('Palworld API URL normalisation', () => {
     it('appends /v1/api when the bare host is given', () => {
-      const config = loadConfig(validEnv({ PALSERVER_API_URL: 'http://192.168.1.50:8212' }));
+      const config = loadConfig(validEnv({ PALWORLD_REST_URL: 'http://192.168.1.50:8212' }));
       assert.equal(config.palworld.apiBaseUrl, 'http://192.168.1.50:8212/v1/api');
     });
 
     it('tolerates a trailing slash', () => {
-      const config = loadConfig(validEnv({ PALSERVER_API_URL: 'http://192.168.1.50:8212/' }));
+      const config = loadConfig(validEnv({ PALWORLD_REST_URL: 'http://192.168.1.50:8212/' }));
       assert.equal(config.palworld.apiBaseUrl, 'http://192.168.1.50:8212/v1/api');
     });
 
     it('keeps an explicit /v1/api instead of doubling it', () => {
-      const config = loadConfig(validEnv({ PALSERVER_API_URL: 'http://192.168.1.50:8212/v1/api' }));
+      const config = loadConfig(validEnv({ PALWORLD_REST_URL: 'http://192.168.1.50:8212/v1/api' }));
       assert.equal(config.palworld.apiBaseUrl, 'http://192.168.1.50:8212/v1/api');
     });
 
     it('keeps an explicit /v1/api with a trailing slash', () => {
-      const config = loadConfig(validEnv({ PALSERVER_API_URL: 'http://host:8212/v1/api/' }));
+      const config = loadConfig(validEnv({ PALWORLD_REST_URL: 'http://host:8212/v1/api/' }));
       assert.equal(config.palworld.apiBaseUrl, 'http://host:8212/v1/api');
     });
 
     it('supports https and hostnames', () => {
       const config = loadConfig(
-        validEnv({ PALSERVER_API_URL: 'https://palworld.example.com:8212' }),
+        validEnv({ PALWORLD_REST_URL: 'https://palworld.example.com:8212' }),
       );
       assert.equal(config.palworld.apiBaseUrl, 'https://palworld.example.com:8212/v1/api');
     });
 
     it('drops query strings and fragments', () => {
-      const config = loadConfig(validEnv({ PALSERVER_API_URL: 'http://host:8212/?x=1#frag' }));
+      const config = loadConfig(validEnv({ PALWORLD_REST_URL: 'http://host:8212/?x=1#frag' }));
       assert.equal(config.palworld.apiBaseUrl, 'http://host:8212/v1/api');
     });
 
     it('rejects a non-http protocol', () => {
-      assertConfigError(validEnv({ PALSERVER_API_URL: 'ftp://host:8212' }), 'http or https');
+      assertConfigError(validEnv({ PALWORLD_REST_URL: 'ftp://host:8212' }), 'http or https');
     });
 
     it('rejects a malformed URL', () => {
-      assertConfigError(validEnv({ PALSERVER_API_URL: 'not-a-url' }), 'not a valid URL');
+      assertConfigError(validEnv({ PALWORLD_REST_URL: 'not-a-url' }), 'not a valid URL');
     });
   });
 
   describe('required fields', () => {
-    it('requires PALSERVER_API_URL', () => {
+    it('requires PALWORLD_REST_URL', () => {
       assertConfigError(
-        validEnv({ PALSERVER_API_URL: undefined }),
-        'PALSERVER_API_URL is required',
+        validEnv({ PALWORLD_REST_URL: undefined }),
+        'PALWORLD_REST_URL is required',
       );
     });
 
-    it('requires PALSERVER_ADMIN_PASSWORD', () => {
+    it('requires PALWORLD_ADMIN_PASSWORD', () => {
       assertConfigError(
-        validEnv({ PALSERVER_ADMIN_PASSWORD: undefined }),
-        'PALSERVER_ADMIN_PASSWORD is required',
-      );
-    });
-
-    it('requires PALSENTRY_SESSION_SECRET', () => {
-      assertConfigError(
-        validEnv({ PALSENTRY_SESSION_SECRET: undefined }),
-        'PALSENTRY_SESSION_SECRET is required',
+        validEnv({ PALWORLD_ADMIN_PASSWORD: undefined }),
+        'PALWORLD_ADMIN_PASSWORD is required',
       );
     });
 
     it('treats a blank value as missing', () => {
-      assertConfigError(validEnv({ PALSERVER_API_URL: '   ' }), 'PALSERVER_API_URL is required');
+      assertConfigError(validEnv({ PALWORLD_REST_URL: '   ' }), 'PALWORLD_REST_URL is required');
     });
   });
 
   describe('auth credentials', () => {
-    it('requires a password or a hash', () => {
-      assertConfigError(
-        validEnv({ PALSENTRY_AUTH_PASSWORD: undefined, PALSENTRY_AUTH_PASSWORD_HASH: undefined }),
-        'No Palsentry credentials configured',
+    it('uses the default password and session secret when they are unset', () => {
+      const config = loadConfig(
+        validEnv({
+          PALSENTRY_LOGIN_PASSWORD: undefined,
+          PALSENTRY_LOGIN_PASSWORD_HASH: undefined,
+          PALSENTRY_SESSION_SECRET: undefined,
+        }),
+      );
+
+      assert.equal(verifyPassword('admin', config.auth.passwordHash), true);
+      assert.equal(config.auth.passwordIsPlaintext, true);
+      assert.equal(
+        config.auth.sessionSecret,
+        'bb5930c05402c03f897c0cdd0e98bb8420a8359f7dbab25fe53df1a5c060d5ea',
+      );
+      assert.ok(config.warnings.some((warning) => warning.includes('default value "admin"')));
+      assert.ok(config.warnings.some((warning) => warning.includes('shared default value')));
+    });
+
+    it('treats blank password and session-secret values as unset', () => {
+      const config = loadConfig(
+        validEnv({ PALSENTRY_LOGIN_PASSWORD: '', PALSENTRY_SESSION_SECRET: '' }),
+      );
+      assert.equal(verifyPassword('admin', config.auth.passwordHash), true);
+      assert.equal(
+        config.auth.sessionSecret,
+        'bb5930c05402c03f897c0cdd0e98bb8420a8359f7dbab25fe53df1a5c060d5ea',
       );
     });
 
@@ -140,14 +157,14 @@ describe('loadConfig', () => {
       const hash = `scrypt$${'ab'.repeat(16)}$${'cd'.repeat(64)}`;
       const config = loadConfig(
         validEnv({
-          PALSENTRY_AUTH_PASSWORD: 'ignored-plaintext',
-          PALSENTRY_AUTH_PASSWORD_HASH: hash,
+          PALSENTRY_LOGIN_PASSWORD: 'ignored-plaintext',
+          PALSENTRY_LOGIN_PASSWORD_HASH: hash,
         }),
       );
       assert.equal(config.auth.passwordHash, hash);
       assert.equal(config.auth.passwordIsPlaintext, false);
       assert.ok(
-        config.warnings.some((w) => w.includes('Both PALSENTRY_AUTH_PASSWORD and')),
+        config.warnings.some((w) => w.includes('Both PALSENTRY_LOGIN_PASSWORD and')),
         'warns that both credentials were supplied',
       );
     });
@@ -155,8 +172,8 @@ describe('loadConfig', () => {
     it('rejects a malformed hash with a helpful message', () => {
       assertConfigError(
         validEnv({
-          PALSENTRY_AUTH_PASSWORD: undefined,
-          PALSENTRY_AUTH_PASSWORD_HASH: 'bcrypt$nope',
+          PALSENTRY_LOGIN_PASSWORD: undefined,
+          PALSENTRY_LOGIN_PASSWORD_HASH: 'bcrypt$nope',
         }),
         'malformed',
       );
@@ -167,7 +184,7 @@ describe('loadConfig', () => {
     });
 
     it('warns when the password has surrounding whitespace', () => {
-      const config = loadConfig(validEnv({ PALSENTRY_AUTH_PASSWORD: ' spaced ' }));
+      const config = loadConfig(validEnv({ PALSENTRY_LOGIN_PASSWORD: ' spaced ' }));
       assert.ok(config.warnings.some((w) => w.includes('leading or trailing whitespace')));
     });
   });
@@ -192,7 +209,7 @@ describe('loadConfig', () => {
 
     it('treats an empty value as unset', () => {
       const config = loadConfig(validEnv({ PALSENTRY_ALLOW_DESTRUCTIVE: '' }));
-      assert.equal(config.allowDestructive, false);
+      assert.equal(config.allowDestructive, true);
     });
 
     it('rejects a non-boolean value', () => {
@@ -324,7 +341,7 @@ describe('loadConfig', () => {
       // Force a failure on a *different* field while a secret is present.
       try {
         loadConfig(
-          validEnv({ PALSENTRY_PORT: 'nope', PALSENTRY_AUTH_PASSWORD: 'super-secret-value' }),
+          validEnv({ PALSENTRY_PORT: 'nope', PALSENTRY_LOGIN_PASSWORD: 'super-secret-value' }),
         );
         assert.fail('expected loadConfig to throw');
       } catch (error) {

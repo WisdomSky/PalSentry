@@ -32,7 +32,7 @@ export async function buildApp(ctx: AppContext) {
   const app = Fastify({
     loggerInstance: logger,
     // Required for `request.ip` (and therefore audit attribution) to reflect the real client
-    // rather than the proxy when Palsentry runs behind one.
+    // rather than the proxy when PalSentry runs behind one.
     trustProxy: config.auth.secureCookies,
     // 256 KB is far above any legitimate body here; the largest is a broadcast message.
     bodyLimit: 256 * 1024,

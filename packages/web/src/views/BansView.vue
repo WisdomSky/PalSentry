@@ -19,13 +19,13 @@ const unbanTarget = ref<BanRecord | null>(null);
 const deleteTarget = ref<BanRecord | null>(null);
 const busy = ref(false);
 
-/** Manual unban by id, for bans issued before Palsentry existed or from the in-game console. */
+/** Manual unban by id, for bans issued before PalSentry existed or from the in-game console. */
 const manualUserid = ref('');
 const manualUnbanTarget = ref<string | null>(null);
 const manualBusy = ref(false);
 
 /**
- * The bans list is Palsentry's own registry, which only changes when someone acts, so it is
+ * The bans list is PalSentry's own registry, which only changes when someone acts, so it is
  * polled slowly rather than on the dashboard's cadence.
  */
 const { run: reload } = usePolling(
@@ -126,8 +126,8 @@ async function forget(): Promise<void> {
     <!--    >-->
     <!--      <p>-->
     <!--        The Palworld REST API can ban and unban but has-->
-    <!--        <strong>no endpoint that lists bans</strong>. This is Palsentry's own record, so it shows-->
-    <!--        bans issued through Palsentry — bans made from the in-game console or before Palsentry was-->
+    <!--        <strong>no endpoint that lists bans</strong>. This is PalSentry's own record, so it shows-->
+    <!--        bans issued through PalSentry — bans made from the in-game console or before PalSentry was-->
     <!--        installed will not appear. Unban those by pasting the player id below.-->
     <!--      </p>-->
     <!--    </div>-->
@@ -169,7 +169,7 @@ async function forget(): Promise<void> {
       <EmptyState
         v-else-if="activeBans.length === 0"
         title="No active bans"
-        description="Bans you issue through Palsentry will be listed here with their reason and history."
+        description="Bans you issue through PalSentry will be listed here with their reason and history."
       >
         <template #icon
           ><Ban class="h-6 w-6 text-slate-300 dark:text-slate-700" aria-hidden="true"
@@ -314,7 +314,7 @@ async function forget(): Promise<void> {
         {{ manualUnbanTarget }}
       </p>
       <p class="text-xs text-slate-500 dark:text-slate-400">
-        Palsentry cannot verify this id first because the REST API has no endpoint that lists bans.
+        PalSentry cannot verify this id first because the REST API has no endpoint that lists bans.
       </p>
     </ConfirmDialog>
 
@@ -342,7 +342,7 @@ async function forget(): Promise<void> {
       @confirm="forget"
     >
       <p>
-        This only deletes Palsentry's record. <strong>It does not unban the player</strong> — use
+        This only deletes PalSentry's record. <strong>It does not unban the player</strong> — use
         Unban for that.
       </p>
       <p class="text-xs text-slate-500 dark:text-slate-400">

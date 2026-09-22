@@ -120,7 +120,7 @@ export function describeFetchFailure(error: unknown, endpoint: string): Palworld
         endpoint,
         message:
           `Connection refused by the Palworld server (${endpoint}). ` +
-          `Check that the server is running and that RESTAPIEnabled=True with RESTAPIPort matching the port in PALSERVER_API_URL.`,
+          `Check that the server is running and that RESTAPIEnabled=True with RESTAPIPort matching the port in PALWORLD_REST_URL.`,
         cause: error,
       });
     case 'ENOTFOUND':
@@ -128,7 +128,7 @@ export function describeFetchFailure(error: unknown, endpoint: string): Palworld
       return new PalworldError({
         kind: 'unreachable',
         endpoint,
-        message: `Could not resolve the Palworld server hostname (${endpoint}). Check PALSERVER_API_URL.`,
+        message: `Could not resolve the Palworld server hostname (${endpoint}). Check PALWORLD_REST_URL.`,
         cause: error,
       });
     case 'ETIMEDOUT':
@@ -164,7 +164,7 @@ export function describeFetchFailure(error: unknown, endpoint: string): Palworld
         message:
           `Could not reach the Palworld server (${endpoint})` +
           (code ? `: ${code}` : '') +
-          '. Check PALSERVER_API_URL and that the server is running.',
+          '. Check PALWORLD_REST_URL and that the server is running.',
         cause: error,
       });
   }

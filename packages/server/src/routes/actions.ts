@@ -177,7 +177,7 @@ export function actionRoutes(ctx: AppContext) {
         payload: body,
         run: async () => {
           const meta = await ctx.client.unban(body.userid);
-          // No match is fine: the ban may have been issued outside Palsentry. The upstream
+          // No match is fine: the ban may have been issued outside PalSentry. The upstream
           // unban is what actually lifts the ban.
           ctx.bans.markUnbanned(body.userid, request.ip);
           return meta;

@@ -11,6 +11,14 @@ async function makeApp(options: Parameters<typeof createTestApp>[0] = {}): Promi
   return app;
 }
 
+/** An app with destructive actions explicitly disabled for gate-denial tests. */
+async function makeSafeApp(options: Parameters<typeof createTestApp>[0] = {}): Promise<TestApp> {
+  return makeApp({
+    ...options,
+    env: { PALSENTRY_ALLOW_DESTRUCTIVE: 'false', ...options.env },
+  });
+}
+
 /** An app with destructive actions enabled, which is what most action tests need. */
 async function makeDestructiveApp(
   options: Parameters<typeof createTestApp>[0] = {},
@@ -56,7 +64,7 @@ describe('the destructive-action gate', () => {
 
   for (const { url, payload } of DESTRUCTIVE) {
     it(`refuses ${url} while PALSENTRY_ALLOW_DESTRUCTIVE is off`, async () => {
-      const { app } = await makeApp();
+      const { app } = await makeSafeApp();
       const cookie = await signIn(app);
 
       const response = await post(app, url, cookie, payload);
@@ -68,7 +76,7 @@ describe('the destructive-action gate', () => {
     });
 
     it(`does not reach the game server for ${url}`, async () => {
-      const { app, stub } = await makeApp();
+      const { app, stub } = await makeSafeApp();
       const cookie = await signIn(app);
 
       await post(app, url, cookie, payload);
@@ -82,8 +90,8 @@ describe('the destructive-action gate', () => {
     });
   }
 
-  it('allows announce and save without the flag', async () => {
-    const { app, stub } = await makeApp();
+  it('allows announce and save while the destructive gate is off', async () => {
+    const { app, stub } = await makeSafeApp();
     const cookie = await signIn(app);
 
     assert.equal((await post(app, '/api/actions/announce', cookie, { message: 'hi' })).status, 200);
@@ -93,7 +101,7 @@ describe('the destructive-action gate', () => {
   });
 
   it('audits a blocked attempt so it is visible in the trail', async () => {
-    const { app } = await makeApp();
+    const { app } = await makeSafeApp();
     const cookie = await signIn(app);
 
     await post(app, '/api/actions/stop', cookie);
@@ -468,7 +476,7 @@ describe('audit trail', () => {
   });
 
   it('filters by outcome', async () => {
-    const { app } = await makeApp();
+    const { app } = await makeSafeApp();
     const cookie = await signIn(app);
 
     await post(app, '/api/actions/announce', cookie, { message: 'ok' });

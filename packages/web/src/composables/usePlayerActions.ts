@@ -26,7 +26,7 @@ export const PLAYER_ACTION_TITLES: Record<PlayerActionKind, string> = {
  * code paths that could drift on something that bans people.
  *
  * The Palworld API's `/kick` and `/ban` both take the `userId` and an optional message; the
- * registry metadata (player name, reason) is Palsentry's own and is sent separately.
+ * registry metadata (player name, reason) is PalSentry's own and is sent separately.
  */
 export function usePlayerActions() {
   const server = useServerStore();

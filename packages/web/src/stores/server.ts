@@ -48,7 +48,7 @@ export const useServerStore = defineStore('server', () => {
   const online = computed(() => status.value?.online === true);
   const serverName = computed(() => status.value?.info?.servername ?? 'Palworld server');
   /**
-   * Everyone Palsentry remembers, online or not.
+   * Everyone PalSentry remembers, online or not.
    *
    * The server keeps this list even while the game server is unreachable, so the Players tab can
    * show who used to play here. Views that mean "who is connected right now" want

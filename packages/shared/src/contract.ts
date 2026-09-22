@@ -6,7 +6,7 @@ import type {
   PalworldSettings,
 } from './palworld.js';
 
-/** Every action Palsentry can perform. Used for routing, audit records, and the UI. */
+/** Every action PalSentry can perform. Used for routing, audit records, and the UI. */
 export type ActionName =
   'announce' | 'save' | 'kick' | 'ban' | 'unban' | 'shutdown' | 'stop' | 'restart';
 
@@ -132,10 +132,10 @@ export interface StatusResponse {
 // ---------------------------------------------------------------------------
 
 /**
- * What Palsentry knows about a player.
+ * What PalSentry knows about a player.
  *
  * The roster outlives the session: `/players` only reports who is connected right now, so these
- * are the fields worth keeping for everyone Palsentry has ever seen. Live connection details are
+ * are the fields worth keeping for everyone PalSentry has ever seen. Live connection details are
  * added by the two variants below rather than held here, so a stale IP address cannot be mistaken
  * for a current one.
  */
@@ -149,7 +149,7 @@ export interface PlayerIdentity {
   location_x: number;
   location_y: number;
   level: number;
-  /** True when Palsentry's registry has an active ban for this `userId`. */
+  /** True when PalSentry's registry has an active ban for this `userId`. */
   banned: boolean;
   banReason: string | null;
   bannedAt: string | null;
@@ -190,7 +190,7 @@ export interface PlayersResponse {
   /**
    * True when the roster was refreshed from a successful live read.
    *
-   * False means Palsentry could not ask the game server, so `players` is the last known roster
+   * False means PalSentry could not ask the game server, so `players` is the last known roster
    * with every entry reported offline rather than an empty list or a set of confident lies.
    */
   online: boolean;

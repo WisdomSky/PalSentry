@@ -2,7 +2,7 @@
 /**
  * End-to-end smoke test.
  *
- * Boots the mock Palworld API and the *built* Palsentry server as real child processes, then
+ * Boots the mock Palworld API and the *built* PalSentry server as real child processes, then
  * exercises the whole stack over HTTP: authentication, every read endpoint, every action, the
  * restart state machine, and the SPA fallback.
  *
@@ -139,7 +139,7 @@ async function main() {
     process.exit(1);
   }
 
-  console.log('\nStarting mock Palworld API and Palsentry…\n');
+  console.log('\nStarting mock Palworld API and PalSentry…\n');
 
   mockProcess = startProcess(
     'mock-palworld',
@@ -159,10 +159,10 @@ async function main() {
     NODE_ENV: 'production',
     PALSENTRY_PORT: String(APP_PORT),
     PALSENTRY_HOST: '127.0.0.1',
-    PALSERVER_API_URL: `http://127.0.0.1:${MOCK_PORT}`,
-    PALSERVER_ADMIN_PASSWORD: PALWORLD_PASSWORD,
-    PALSENTRY_AUTH_USERNAME: APP_USERNAME,
-    PALSENTRY_AUTH_PASSWORD: APP_PASSWORD,
+    PALWORLD_REST_URL: `http://127.0.0.1:${MOCK_PORT}`,
+    PALWORLD_ADMIN_PASSWORD: PALWORLD_PASSWORD,
+    PALSENTRY_LOGIN_USERNAME: APP_USERNAME,
+    PALSENTRY_LOGIN_PASSWORD: APP_PASSWORD,
     PALSENTRY_SESSION_SECRET: SESSION_SECRET,
     PALSENTRY_ALLOW_DESTRUCTIVE: 'true',
     PALSENTRY_SAMPLE_INTERVAL_SECONDS: '5',
@@ -564,7 +564,7 @@ async function main() {
 
   // -------------------------------------------------------------- resilience
   await check('a stopped Palworld server is reported, not crashed on', async () => {
-    // Log back in, then kill the mock and confirm Palsentry degrades instead of erroring out.
+    // Log back in, then kill the mock and confirm PalSentry degrades instead of erroring out.
     await app.post('/api/auth/login', { username: APP_USERNAME, password: APP_PASSWORD });
 
     mockProcess.kill('SIGKILL');
@@ -611,7 +611,7 @@ async function main() {
     return `status 200 online:false (${status.body.error.code}), bases optional, settings 502`;
   });
 
-  await check('Palsentry itself is still healthy with the game server down', async () => {
+  await check('PalSentry itself is still healthy with the game server down', async () => {
     const { status, body } = await app.get('/api/health');
     if (status !== 200 || body.status !== 'ok') throw new Error('health check failed');
     return 'ok';

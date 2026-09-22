@@ -301,7 +301,7 @@ async function confirmPending(): Promise<void> {
       @confirm="confirmPending"
     >
       <p>
-        Palsentry will announce the restart, save the world, and shut the server down. It then waits
+        PalSentry will announce the restart, save the world, and shut the server down. It then waits
         for the container to come back online.
       </p>
       <div class="flex items-center gap-2">

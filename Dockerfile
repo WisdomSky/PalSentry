@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---------------------------------------------------------------------------
-# Palsentry — single image serving both the API and the built SPA.
+# PalSentry — single image serving both the API and the built SPA.
 #
 # One container means no CORS configuration, no second service, and the simplest possible
 # compose file. The stages below are ordered so the final image contains only the compiled
@@ -92,7 +92,7 @@ EXPOSE 3000
 VOLUME ["/data"]
 
 # Uses Node itself rather than curl/wget so the image needs no extra packages.
-# Note this is a liveness check for *Palsentry*; it intentionally does not depend on the
+# Note this is a liveness check for *PalSentry*; it intentionally does not depend on the
 # Palworld server, so an offline game server never marks the dashboard unhealthy.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PALSENTRY_PORT||3000)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"

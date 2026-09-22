@@ -6,7 +6,7 @@ import { createLogger } from '../../src/logger.js';
 import { startPalworldStub, type PalworldStub, type StubOptions } from './palworld-stub.js';
 
 /**
- * Build a fully wired Palsentry app backed by a stubbed Palworld server and an in-memory
+ * Build a fully wired PalSentry app backed by a stubbed Palworld server and an in-memory
  * database, driven through `app.inject()` — real routing, real hooks, real cookies, no ports.
  */
 
@@ -33,10 +33,10 @@ export interface CreateTestAppOptions {
 export function baseEnv(palworldUrl: string, overrides: Record<string, string | undefined> = {}) {
   return {
     NODE_ENV: 'test',
-    PALSERVER_API_URL: palworldUrl,
-    PALSERVER_ADMIN_PASSWORD: 'test-palworld-password',
-    PALSENTRY_AUTH_USERNAME: TEST_USERNAME,
-    PALSENTRY_AUTH_PASSWORD: TEST_PASSWORD,
+    PALWORLD_REST_URL: palworldUrl,
+    PALWORLD_ADMIN_PASSWORD: 'test-palworld-password',
+    PALSENTRY_LOGIN_USERNAME: TEST_USERNAME,
+    PALSENTRY_LOGIN_PASSWORD: TEST_PASSWORD,
     PALSENTRY_SESSION_SECRET: TEST_SESSION_SECRET,
     // Keep the registry out of the working tree.
     PALSENTRY_DB_PATH: ':memory:',

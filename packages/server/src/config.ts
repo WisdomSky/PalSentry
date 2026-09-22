@@ -10,6 +10,10 @@ import {
 import { z } from 'zod';
 import { PASSWORD_HASH_PREFIX, hashPassword, parsePasswordHash } from './auth/password.js';
 
+const DEFAULT_PALSENTRY_LOGIN_PASSWORD = 'admin';
+const DEFAULT_PALSENTRY_SESSION_SECRET =
+  'bb5930c05402c03f897c0cdd0e98bb8420a8359f7dbab25fe53df1a5c060d5ea';
+
 /** Thrown when the environment is unusable. The entrypoint prints this and exits non-zero. */
 export class ConfigError extends Error {
   constructor(message: string) {
@@ -28,9 +32,9 @@ export interface PalworldConfig {
 
 export interface AuthConfig {
   username: string;
-  /** `scrypt$salt$hash`. Always populated — derived from `PALSENTRY_AUTH_PASSWORD` if needed. */
+  /** `scrypt$salt$hash`. Always populated — derived from `PALSENTRY_LOGIN_PASSWORD` if needed. */
   passwordHash: string;
-  /** True when the operator supplied a plaintext password rather than a hash. */
+  /** True when using a plaintext password (operator-supplied or the built-in default). */
   passwordIsPlaintext: boolean;
   sessionSecret: string;
   sessionTtlHours: number;
@@ -163,8 +167,8 @@ const envSchema = z.object({
   NODE_ENV: envEnum(['development', 'production', 'test'] as const, 'development'),
 
   // --- Palworld server ---
-  PALSERVER_API_URL: requiredString(
-    'PALSERVER_API_URL is required, e.g. http://192.168.1.50:8212 (the host and RESTAPIPort of your Palworld server)',
+  PALWORLD_REST_URL: requiredString(
+    'PALWORLD_REST_URL is required, e.g. http://192.168.1.50:8212 (the host and RESTAPIPort of your Palworld server)',
   ),
   PALSERVER_REST_USERNAME: z
     .string()
@@ -173,34 +177,38 @@ const envSchema = z.object({
       const trimmed = value?.trim();
       return trimmed === undefined || trimmed === '' ? 'admin' : trimmed;
     }),
-  PALSERVER_ADMIN_PASSWORD: secretString(
-    'PALSERVER_ADMIN_PASSWORD is required (the AdminPassword from your PalWorldSettings.ini)',
+  PALWORLD_ADMIN_PASSWORD: secretString(
+    'PALWORLD_ADMIN_PASSWORD is required (the AdminPassword from your PalWorldSettings.ini)',
   ),
   PALSERVER_TIMEOUT_MS: envInt(10_000, 500, 120_000),
 
-  // --- Palsentry auth ---
-  PALSENTRY_AUTH_USERNAME: z
+  // --- PalSentry auth ---
+  PALSENTRY_LOGIN_USERNAME: z
     .string()
     .optional()
     .transform((value) => {
       const trimmed = value?.trim();
       return trimmed === undefined || trimmed === '' ? 'admin' : trimmed;
     }),
-  PALSENTRY_AUTH_PASSWORD: z.string().optional(),
-  PALSENTRY_AUTH_PASSWORD_HASH: z
+  PALSENTRY_LOGIN_PASSWORD: z
+    .string()
+    .optional()
+    .transform((value) => value || DEFAULT_PALSENTRY_LOGIN_PASSWORD),
+  PALSENTRY_LOGIN_PASSWORD_HASH: z
     .string()
     .optional()
     .transform((value) => {
       const trimmed = value?.trim();
       return trimmed === undefined || trimmed === '' ? null : trimmed;
     }),
-  PALSENTRY_SESSION_SECRET: secretString(
-    'PALSENTRY_SESSION_SECRET is required — generate one with: openssl rand -hex 32',
-  ),
+  PALSENTRY_SESSION_SECRET: z
+    .string()
+    .optional()
+    .transform((value) => value || DEFAULT_PALSENTRY_SESSION_SECRET),
   PALSENTRY_SESSION_TTL_HOURS: envInt(12, 1, 24 * 30),
   PALSENTRY_TRUST_PROXY: envBool(false),
 
-  // --- Palsentry runtime ---
+  // --- PalSentry runtime ---
   PALSENTRY_PORT: envInt(3000, 1, 65_535),
   PALSENTRY_HOST: z
     .string()
@@ -211,7 +219,7 @@ const envSchema = z.object({
     }),
   PALSENTRY_DATA_DIR: optionalString(),
   PALSENTRY_DB_PATH: optionalString(),
-  PALSENTRY_ALLOW_DESTRUCTIVE: envBool(false),
+  PALSENTRY_ALLOW_DESTRUCTIVE: envBool(true),
   PALSENTRY_HISTORY_RETENTION_DAYS: envInt(30, 1, 3650),
   PALSENTRY_SAMPLE_INTERVAL_SECONDS: envInt(60, 5, 3600),
   PALSENTRY_RESTART_WAIT_SECONDS: envInt(30, 0, 3600),
@@ -232,9 +240,9 @@ const envSchema = z.object({
 
 /** Env keys whose values must never be echoed back in an error message. */
 const SECRET_KEYS = new Set([
-  'PALSERVER_ADMIN_PASSWORD',
-  'PALSENTRY_AUTH_PASSWORD',
-  'PALSENTRY_AUTH_PASSWORD_HASH',
+  'PALWORLD_ADMIN_PASSWORD',
+  'PALSENTRY_LOGIN_PASSWORD',
+  'PALSENTRY_LOGIN_PASSWORD_HASH',
   'PALSENTRY_SESSION_SECRET',
 ]);
 
@@ -267,13 +275,13 @@ function normaliseApiBaseUrl(raw: string): string {
     url = new URL(raw);
   } catch {
     throw new ConfigError(
-      `PALSERVER_API_URL is not a valid URL: "${raw}"\n` +
+      `PALWORLD_REST_URL is not a valid URL: "${raw}"\n` +
         `  Expected something like http://192.168.1.50:8212`,
     );
   }
 
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new ConfigError(`PALSERVER_API_URL must use http or https, got "${url.protocol}"`);
+    throw new ConfigError(`PALWORLD_REST_URL must use http or https, got "${url.protocol}"`);
   }
 
   const pathname = url.pathname.replace(/\/+$/, '');
@@ -300,49 +308,48 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const warnings: string[] = [];
 
   // ---- Auth: resolve the password hash -------------------------------------
-  if (parsed.PALSENTRY_AUTH_PASSWORD_HASH === null && !parsed.PALSENTRY_AUTH_PASSWORD) {
-    throw new ConfigError(
-      'No Palsentry credentials configured.\n' +
-        '  Set PALSENTRY_AUTH_PASSWORD (simplest) or PALSENTRY_AUTH_PASSWORD_HASH (preferred).\n' +
-        '  Generate a hash with:  npm run hash-password -- "your-password"',
-    );
-  }
-
   let passwordHash: string;
   let passwordIsPlaintext = false;
 
-  if (parsed.PALSENTRY_AUTH_PASSWORD_HASH !== null) {
-    if (parsePasswordHash(parsed.PALSENTRY_AUTH_PASSWORD_HASH) === null) {
+  if (parsed.PALSENTRY_LOGIN_PASSWORD_HASH !== null) {
+    if (parsePasswordHash(parsed.PALSENTRY_LOGIN_PASSWORD_HASH) === null) {
       throw new ConfigError(
-        'PALSENTRY_AUTH_PASSWORD_HASH is malformed.\n' +
+        'PALSENTRY_LOGIN_PASSWORD_HASH is malformed.\n' +
           `  Expected the form ${PASSWORD_HASH_PREFIX}<saltHex>$<hashHex>, produced by:\n` +
           '    npm run hash-password -- "your-password"',
       );
     }
-    passwordHash = parsed.PALSENTRY_AUTH_PASSWORD_HASH;
-    if (parsed.PALSENTRY_AUTH_PASSWORD) {
+    passwordHash = parsed.PALSENTRY_LOGIN_PASSWORD_HASH;
+    if (parsed.PALSENTRY_LOGIN_PASSWORD !== DEFAULT_PALSENTRY_LOGIN_PASSWORD) {
       warnings.push(
-        'Both PALSENTRY_AUTH_PASSWORD and PALSENTRY_AUTH_PASSWORD_HASH are set. Using the hash; ' +
-          'remove PALSENTRY_AUTH_PASSWORD so the plaintext password is not stored on disk.',
+        'Both PALSENTRY_LOGIN_PASSWORD and PALSENTRY_LOGIN_PASSWORD_HASH are set. Using the hash; ' +
+          'remove PALSENTRY_LOGIN_PASSWORD so the plaintext password is not stored on disk.',
       );
     }
   } else {
     // Hash the plaintext once at boot so the login path always compares against a hash.
-    passwordHash = hashPassword(parsed.PALSENTRY_AUTH_PASSWORD ?? '');
+    passwordHash = hashPassword(parsed.PALSENTRY_LOGIN_PASSWORD);
     passwordIsPlaintext = true;
-    warnings.push(
-      'PALSENTRY_AUTH_PASSWORD is stored in plaintext. This is fine for a local .env, but you can ' +
-        'avoid keeping the password on disk by using PALSENTRY_AUTH_PASSWORD_HASH instead ' +
-        '(npm run hash-password).',
-    );
+    if (parsed.PALSENTRY_LOGIN_PASSWORD === DEFAULT_PALSENTRY_LOGIN_PASSWORD) {
+      warnings.push(
+        'PALSENTRY_LOGIN_PASSWORD is using the default value "admin". Change it before exposing ' +
+          'PalSentry beyond a trusted local network.',
+      );
+    } else {
+      warnings.push(
+        'PALSENTRY_LOGIN_PASSWORD is stored in plaintext. This is fine for a local .env, but you can ' +
+          'avoid keeping the password on disk by using PALSENTRY_LOGIN_PASSWORD_HASH instead ' +
+          '(npm run hash-password).',
+      );
+    }
   }
 
   if (
-    parsed.PALSENTRY_AUTH_PASSWORD &&
-    parsed.PALSENTRY_AUTH_PASSWORD !== parsed.PALSENTRY_AUTH_PASSWORD.trim()
+    parsed.PALSENTRY_LOGIN_PASSWORD &&
+    parsed.PALSENTRY_LOGIN_PASSWORD !== parsed.PALSENTRY_LOGIN_PASSWORD.trim()
   ) {
     warnings.push(
-      'PALSENTRY_AUTH_PASSWORD has leading or trailing whitespace, which is easy to lose when ' +
+      'PALSENTRY_LOGIN_PASSWORD has leading or trailing whitespace, which is easy to lose when ' +
         'editing .env files. Remove it unless it is intentional.',
     );
   }
@@ -351,6 +358,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new ConfigError(
       `PALSENTRY_SESSION_SECRET must be at least 32 characters (got ${parsed.PALSENTRY_SESSION_SECRET.length}).\n` +
         '  Generate one with:  openssl rand -hex 32',
+    );
+  }
+  if (parsed.PALSENTRY_SESSION_SECRET === DEFAULT_PALSENTRY_SESSION_SECRET) {
+    warnings.push(
+      'PALSENTRY_SESSION_SECRET is using the shared default value. Replace it with a random secret ' +
+        'before exposing PalSentry beyond a trusted local network.',
     );
   }
 
@@ -379,7 +392,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (parsed.PALSENTRY_ALLOW_DESTRUCTIVE) {
     warnings.push(
       'PALSENTRY_ALLOW_DESTRUCTIVE=true — kick, ban, unban, shutdown, stop, and restart are enabled. ' +
-        'Make sure Palsentry is not reachable from the public internet.',
+        'Make sure PalSentry is not reachable from the public internet.',
     );
   }
 
@@ -406,7 +419,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (parsed.NODE_ENV === 'production' && parsed.PALSENTRY_TRUST_PROXY === false) {
     warnings.push(
       'PALSENTRY_TRUST_PROXY=false, so the session cookie is not marked Secure. Set it to true ' +
-        'when Palsentry is served over HTTPS/TLS by a reverse proxy.',
+        'when PalSentry is served over HTTPS/TLS by a reverse proxy.',
     );
   }
 
@@ -419,13 +432,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     dataDir,
     dbPath,
     palworld: {
-      apiBaseUrl: normaliseApiBaseUrl(parsed.PALSERVER_API_URL),
+      apiBaseUrl: normaliseApiBaseUrl(parsed.PALWORLD_REST_URL),
       username: parsed.PALSERVER_REST_USERNAME,
-      password: parsed.PALSERVER_ADMIN_PASSWORD,
+      password: parsed.PALWORLD_ADMIN_PASSWORD,
       timeoutMs: parsed.PALSERVER_TIMEOUT_MS,
     },
     auth: {
-      username: parsed.PALSENTRY_AUTH_USERNAME,
+      username: parsed.PALSENTRY_LOGIN_USERNAME,
       passwordHash,
       passwordIsPlaintext,
       sessionSecret: parsed.PALSENTRY_SESSION_SECRET,

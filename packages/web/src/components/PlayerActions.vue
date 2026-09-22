@@ -68,7 +68,7 @@ defineExpose({ open, openAnnounceTo, busyUserid });
     @confirm="confirm"
   >
     <p>
-      <strong>{{ player?.name }}</strong> will be disconnected and blocked from rejoining. Palsentry
+      <strong>{{ player?.name }}</strong> will be disconnected and blocked from rejoining. PalSentry
       records the ban so you can unban them later.
     </p>
     <div>

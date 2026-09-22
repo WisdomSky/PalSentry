@@ -8,7 +8,7 @@ import { runMigrations } from './migrations.js';
 export type Db = Database.Database;
 
 /**
- * Open (creating if needed) the Palsentry database and bring its schema up to date.
+ * Open (creating if needed) the PalSentry database and bring its schema up to date.
  *
  * Pragmas worth explaining:
  * - `journal_mode = WAL` lets the metrics poller write while the UI reads, with no reader

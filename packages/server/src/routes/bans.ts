@@ -20,7 +20,7 @@ export function bansRoutes(ctx: AppContext) {
     /**
      * Forget a registry row.
      *
-     * Only touches Palsentry's own bookkeeping. Audited so a removed entry is still traceable —
+     * Only touches PalSentry's own bookkeeping. Audited so a removed entry is still traceable —
      * otherwise deleting a row would be a way to hide a ban you issued.
      */
     app.delete('/bans/:id', async (request, reply): Promise<void> => {

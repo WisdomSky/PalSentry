@@ -34,7 +34,7 @@ export const useSessionStore = defineStore('session', () => {
     try {
       apply(await api.me());
     } catch {
-      // A failure here means the Palsentry server is unreachable, not that we are signed out.
+      // A failure here means the PalSentry server is unreachable, not that we are signed out.
       // Treat it as unauthenticated so the app renders the login screen rather than hanging.
       apply({ authenticated: false, user: null });
     }

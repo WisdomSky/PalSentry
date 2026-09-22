@@ -56,21 +56,19 @@ jobs:
 
       - name: Validate environment-only Compose configuration
         env:
-          PALSERVER_API_URL: http://palworld.internal:8212
-          PALSERVER_ADMIN_PASSWORD: compose-check-palworld-password
-          PALSENTRY_AUTH_PASSWORD: compose-check-dashboard-password
-          PALSENTRY_SESSION_SECRET: compose-check-session-secret-at-least-32-characters
+          PALWORLD_REST_URL: http://palworld.internal:8212
+          PALWORLD_ADMIN_PASSWORD: compose-check-palworld-password
         run: |
           test ! -e .env
           docker compose config --quiet
           docker compose -f docker-compose.yml -f docker-compose.build.yml config --quiet
           docker compose -f docker-compose.yml -f docker-compose.dev.yml config --quiet
 
-          # The optional template must be inert until its required blanks are filled.
+          # The optional template must remain inert until its required Palworld password is filled.
           docker compose --env-file .env.example config --quiet
-          if env -u PALSERVER_API_URL -u PALSERVER_ADMIN_PASSWORD -u PALSENTRY_SESSION_SECRET \
-            -u PALSENTRY_AUTH_PASSWORD docker compose --env-file .env.example config --quiet 2>/dev/null; then
-            echo "A blank .env.example must not produce a runnable configuration." >&2
+          if env -u PALWORLD_REST_URL -u PALWORLD_ADMIN_PASSWORD \
+            docker compose --env-file .env.example config --quiet 2>/dev/null; then
+            echo "An unconfigured .env.example must not produce a runnable configuration." >&2
             exit 1
           fi
 
@@ -86,8 +84,16 @@ jobs:
           if (service.build !== undefined) {
             throw new Error('The default production service must pull rather than build.');
           }
-          if (environment.PALSERVER_API_URL !== process.env.PALSERVER_API_URL) {
+          if (environment.PALWORLD_REST_URL !== process.env.PALWORLD_REST_URL) {
             throw new Error('Shell-provided environment was not passed to the service.');
+          }
+          if (
+            environment.PALSENTRY_LOGIN_PASSWORD !== 'admin' ||
+            environment.PALSENTRY_SESSION_SECRET !==
+              'bb5930c05402c03f897c0cdd0e98bb8420a8359f7dbab25fe53df1a5c060d5ea' ||
+            environment.PALSENTRY_ALLOW_DESTRUCTIVE !== 'true'
+          ) {
+            throw new Error('Compose did not apply the documented PalSentry defaults.');
           }
           if (
             environment.PALSENTRY_HOST !== '0.0.0.0' ||

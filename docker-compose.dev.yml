@@ -15,11 +15,14 @@ services:
     environment:
       NODE_ENV: development
       VITE_DEV_HOST: 0.0.0.0
+    env_file:
+      - .env
     ports:
-      - '${PALSENTRY_BIND_ADDRESS:-127.0.0.1}:5173:5173'
+      - '5173:5173'
     volumes:
       # Configuration is inherited from the base service's environment mapping. Mount only source
       # files, NEVER an .env file or the host's node_modules/native SQLite binary.
+      - ./.env:/app/.env:ro
       - ./packages/server/src:/app/packages/server/src:ro
       - ./packages/shared/src:/app/packages/shared/src:ro
       - ./packages/web/src:/app/packages/web/src:ro

@@ -87,7 +87,7 @@ const groups = computed(() => {
     result.push({
       id: 'other',
       label: 'Other',
-      description: 'Keys this build of Palsentry does not recognise yet.',
+      description: 'Keys this build of PalSentry does not recognise yet.',
       rows: leftovers,
     });
   }

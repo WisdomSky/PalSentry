@@ -17,7 +17,7 @@ async function main(): Promise<void> {
   } catch (error) {
     if (error instanceof ConfigError) {
       // Plain stderr: the logger is not configured yet and cannot be trusted.
-      console.error(`\n  Palsentry cannot start — configuration problem\n\n${error.message}\n`);
+      console.error(`\n  PalSentry cannot start — configuration problem\n\n${error.message}\n`);
       process.exit(1);
     }
     throw error;
@@ -44,7 +44,7 @@ async function main(): Promise<void> {
       },
       mapProjection: config.map.projection,
     },
-    'Palsentry starting',
+    'PalSentry starting',
   );
 
   const app = await buildApp(ctx);
@@ -90,14 +90,14 @@ async function main(): Promise<void> {
 
   if (config.allowDestructive) {
     logger.warn(
-      'Destructive actions are enabled. Never expose Palsentry directly to the public internet — ' +
+      'Destructive actions are enabled. Never expose PalSentry directly to the public internet — ' +
         'put it behind a VPN or an authenticating reverse proxy.',
     );
   }
 
   logger.info(
     { url: `http://${config.host === '0.0.0.0' ? 'localhost' : config.host}:${config.port}` },
-    'Palsentry is ready',
+    'PalSentry is ready',
   );
 }
 
