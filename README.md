@@ -47,18 +47,6 @@ http://localhost:3000
 PalSentry is also available as a desktop app for macOS, Windows and Linux. Download the installer for
 your platform from [GitHub Releases](https://github.com/WisdomSky/PalSentry/releases) and open it.
 
-The desktop app serves the same dashboard and runs the same recording engine locally, but collects
-the Palworld connection in the app instead of from the environment:
-
-1. Enter the Palworld REST URL and admin password on the connection screen.
-2. PalSentry checks the credentials against your server, then starts recording.
-3. The REST URL is remembered for the next launch. The admin password is never written to disk and is
-   asked for again every time the app starts.
-
-Closing the window keeps PalSentry running in the system tray so monitoring and player tracking
-continue; use the tray icon to reopen the window or to quit. The dashboard is served on a stable
-loopback port (`127.0.0.1:43100`–`43199`) that only your own machine can reach.
-
 > [!NOTE]
 > macOS builds are unsigned, so Gatekeeper blocks the first launch: open **System Settings → Privacy
 > & Security** and choose **Open Anyway**, or right-click the app and choose **Open**. Windows and
