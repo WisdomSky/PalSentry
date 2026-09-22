@@ -73,6 +73,13 @@ nsis:
 linux:
   icon: build/icon.png
   category: Utility
+  # Linux names the binary after the package name — `@palsentry/desktop` for this workspace package,
+  # which is not even a legal file name and makes AppImage packaging fail outright. Keep it
+  # lowercase, the way Linux expects a command to be spelled.
+  executableName: palsentry
+  # Electron uses package.json's `desktopName` as its app_id/WM_CLASS on Wayland. Naming the
+  # installed .desktop file after it lets desktops link the running window to the launcher entry.
+  syncDesktopName: true
   synopsis: Palworld server dashboard
   description: >-
     PalSentry monitors a Palworld dedicated server: live players and bases, performance metrics,
@@ -83,6 +90,15 @@ linux:
       arch: [x64]
     - target: deb
       arch: [x64]
+
+deb:
+  # fpm downcases it anyway (Debian package names are lower case); saying so explicitly drops its
+  # "I have downcased the package name for you" warning.
+  packageName: palsentry
+  # The deb artifact is named after the package name by default, so this workspace package made
+  # electron-builder write into `release/@palsentry/` — a directory that does not exist, which fails
+  # the build — and would have landed outside the workflow's `release/*.deb` upload glob.
+  artifactName: PalSentry-${version}-amd64.deb
 
 # electron-updater reads this at runtime; the release workflow publishes to the same place.
 publish:

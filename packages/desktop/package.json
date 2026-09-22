@@ -1,6 +1,7 @@
 {
   "name": "@palsentry/desktop",
   "productName": "PalSentry",
+  "desktopName": "palsentry.desktop",
   "version": "1.0.0",
   "private": true,
   "description": "PalSentry desktop app for macOS, Windows and Linux",
