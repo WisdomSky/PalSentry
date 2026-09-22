@@ -30,12 +30,71 @@ function desktopFailureMessage(kind: PalworldErrorKind, message: string, restUrl
       return 'The Palworld server rejected the admin password. Check AdminPassword in PalWorldSettings.ini.';
     case 'unreachable':
     case 'timeout':
-      return `Could not reach ${restUrl}. Check that the server is running and that RESTAPIEnabled=True with the right REST API port.`;
+      return (
+        `Could not reach ${restUrl}. Check that the server is running and that RESTAPIEnabled=True with the right REST API port.` +
+        localNetworkHint(restUrl)
+      );
     case 'not_found':
       return `The Palworld REST API answered at ${restUrl} but without the expected endpoint. Check that RESTAPIEnabled=True.`;
     default:
       return message;
   }
+}
+
+/**
+ * Hosts macOS counts as "the local network" for its privacy permission.
+ *
+ * Loopback is exempt — that is how the app reaches its own embedded server — while RFC1918
+ * addresses, link-local addresses, Bonjour names and bare hostnames are not.
+ */
+function isLocalNetworkHost(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (host === '' || host === 'localhost' || host === '::1' || host.startsWith('127.'))
+    return false;
+
+  if (host.endsWith('.local')) return true;
+
+  const octets = host.split('.');
+  if (octets.length === 4 && octets.every((octet) => /^\d{1,3}$/.test(octet))) {
+    const [first, second] = octets.map(Number);
+    return (
+      first === 10 ||
+      (first === 172 && second >= 16 && second <= 31) ||
+      (first === 192 && second === 168) ||
+      (first === 169 && second === 254)
+    );
+  }
+
+  // A bare hostname such as `gaming-pc` is resolved on the local network, unlike `example.com`.
+  return octets.length === 1;
+}
+
+/**
+ * A note for the failure macOS local network privacy produces.
+ *
+ * macOS 15 and later drop an app's connections to the local network unless the user allows it, and
+ * the raw failure looks exactly like a Palworld server that is simply down: `EHOSTUNREACH`, no
+ * prompt, and no mention of the permission anywhere in the app. Saying so turns a dead end into one
+ * setting to switch on. `platform` is a parameter so the wording can be tested off macOS.
+ */
+export function localNetworkHint(
+  restUrl: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform !== 'darwin') return '';
+
+  let hostname: string;
+  try {
+    hostname = new URL(restUrl).hostname;
+  } catch {
+    return '';
+  }
+  if (!isLocalNetworkHost(hostname)) return '';
+
+  return (
+    ' macOS may also be blocking PalSentry from reaching your local network: open System Settings' +
+    ' → Privacy & Security → Local Network and turn PalSentry on.'
+  );
 }
 
 /**

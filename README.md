@@ -65,6 +65,12 @@ loopback port (`127.0.0.1:43100`–`43199`) that only your own machine can reach
 > Linux builds update themselves from GitHub Releases, while unsigned macOS builds do not check for
 > updates and are upgraded by downloading a new version.
 
+> [!NOTE]
+> On macOS 15 and later, the first time PalSentry connects to a Palworld server on your local network
+> macOS asks whether it may access that network. Allow it: without permission macOS silently drops
+> every connection, and PalSentry can only report the server as unreachable. If you missed the prompt,
+> turn PalSentry on under **System Settings → Privacy & Security → Local Network**.
+
 ---
 
 ## Features

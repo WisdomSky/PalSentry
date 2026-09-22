@@ -339,6 +339,13 @@ Electron main process (window, tray, updater)
   has Open PalSentry, Check for updates…, Restart to update (only when one is downloaded), Open log
   folder and Quit PalSentry. `Cmd+Q`, the application menu's Quit and the tray's Quit all run the same
   ordered shutdown (window → tray → server → SQLite) before the process exits.
+- **Local network (macOS).** macOS 15 and later refuse an app access to the local network unless it
+  declares `NSLocalNetworkUsageDescription` — set through `mac.extendInfo` in `electron-builder.yml` —
+  and the user allows it. Until then, connections to a Palworld server on `192.168.x.x`, `10.x.x.x` or
+  `*.local` fail with `EHOSTUNREACH`, with no prompt and nothing in System Settings. A build launched
+  from a terminal inherits the terminal's permission, so a LAN connection that works under
+  `npm run dev` can still fail once the packaged app is launched from Finder — launch it with
+  `open <app>` when testing that path.
 - **Updates.** `electron-updater` reads GitHub Releases. Checks only run on packaged Windows and Linux
   builds; development builds and unsigned macOS builds report why they are skipped instead.
   `PALSENTRY_UPDATE_FEED` points the updater at any other feed, which is how the update path is tested

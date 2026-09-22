@@ -434,16 +434,22 @@ child.on('exit', () => {
 });
 
 async function stopApp() {
-  if (!exited) {
+  if (exited) return;
+
+  // Ask the app to quit the way Cmd+Q does, so the ordered shutdown runs. The inspector can lose a
+  // race with a window that is already closing, so retry before falling back to a signal — SIGTERM
+  // skips the ordered path and would report a shutdown failure that never happened.
+  for (let attempt = 0; attempt < 3 && !exited; attempt += 1) {
     try {
       await mainEval(inspectorPort, "req('electron').app.quit(); return 'quitting';");
+      break;
     } catch {
-      child.kill('SIGTERM');
+      if (attempt === 2) child.kill('SIGTERM');
+      else await sleep(500);
     }
-    await waitFor('app exit', () => exited, { timeoutMs: 20_000 }).catch(() =>
-      child.kill('SIGKILL'),
-    );
   }
+
+  await waitFor('app exit', () => exited, { timeoutMs: 20_000 }).catch(() => child.kill('SIGKILL'));
 }
 
 try {
@@ -560,6 +566,22 @@ try {
     }
 
     return `${chrome}px of window chrome on ${process.platform}`;
+  });
+
+  await check('declares why it needs the local network on macOS', async () => {
+    if (process.platform !== 'darwin') return `not applicable on ${process.platform}`;
+
+    // macOS 15 and later drop an app's connections to 192.168.x.x, 10.x.x.x and *.local unless the
+    // app declares why it needs them. Without the key the denial is silent: no prompt, nothing in
+    // System Settings, and a Palworld server that only ever looks unreachable.
+    const plist = path.join(path.dirname(path.dirname(appPath)), 'Info.plist');
+    const contents = await readFile(plist, 'utf8');
+    assert(
+      contents.includes('NSLocalNetworkUsageDescription'),
+      `${plist} does not declare NSLocalNetworkUsageDescription`,
+    );
+
+    return 'Info.plist declares NSLocalNetworkUsageDescription';
   });
 
   await check('keeps web content out of new windows', async () => {

@@ -9,6 +9,7 @@ import type {
   MetaResponse,
   StatusResponse,
 } from '@palsentry/shared';
+import { localNetworkHint } from '../src/services/desktop-settings.js';
 import { createTestApp, type TestApp } from './helpers/test-app.js';
 
 /**
@@ -536,5 +537,45 @@ describe('desktop hosting', () => {
         await app.close();
       }
     });
+  });
+});
+
+describe('macOS local network hint', () => {
+  const HINT = /Local Network/;
+
+  it('explains the permission for local addresses on macOS', () => {
+    for (const url of [
+      'http://192.168.50.200:8212/v1/api',
+      'http://10.0.0.5:8212/v1/api',
+      'http://172.16.4.9:8212/v1/api',
+      'http://172.31.255.254:8212/v1/api',
+      'http://169.254.10.1:8212/v1/api',
+      'http://palworld.local:8212/v1/api',
+      'http://gaming-pc:8212/v1/api',
+    ]) {
+      assert.match(localNetworkHint(url, 'darwin'), HINT, `expected a hint for ${url}`);
+    }
+  });
+
+  it('stays quiet when the permission cannot be the cause', () => {
+    for (const url of [
+      // Loopback is exempt from the permission: this is how the app reaches its own server.
+      'http://127.0.0.1:8212/v1/api',
+      'http://localhost:8212/v1/api',
+      // A public address is not the local network.
+      'http://8.8.8.8:8212/v1/api',
+      'http://palworld.example.com:8212/v1/api',
+      // 172.32 is outside the private range, 192.169 is not 192.168.
+      'http://172.32.0.1:8212/v1/api',
+      'http://192.169.1.1:8212/v1/api',
+    ]) {
+      assert.equal(localNetworkHint(url, 'darwin'), '', `expected no hint for ${url}`);
+    }
+  });
+
+  it('is macOS only, and tolerates a URL it cannot parse', () => {
+    assert.equal(localNetworkHint('http://192.168.50.200:8212/v1/api', 'linux'), '');
+    assert.equal(localNetworkHint('http://192.168.50.200:8212/v1/api', 'win32'), '');
+    assert.equal(localNetworkHint('not a url', 'darwin'), '');
   });
 });

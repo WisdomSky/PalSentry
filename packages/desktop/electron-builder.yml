@@ -45,6 +45,12 @@ mac:
   notarize: false
   hardenedRuntime: false
   gatekeeperAssess: false
+  # macOS 15 and later deny an app access to the local network (a Palworld server on 192.168.x.x,
+  # 10.x.x.x or *.local) unless the app says why it needs it. Without this key the denial is silent:
+  # no permission prompt, no entry in System Settings, and connections are dropped at the network
+  # layer, which the app can only report as an unreachable server.
+  extendInfo:
+    NSLocalNetworkUsageDescription: PalSentry connects to your Palworld server on the local network to read its status, players and metrics.
   target:
     - target: dmg
       arch: [arm64, x64]
