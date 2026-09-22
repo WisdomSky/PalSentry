@@ -106,17 +106,26 @@ async function start(): Promise<void> {
 
   app.on('activate', () => showWindow());
 
-  // Deliberately no `window-all-closed` handler: closing the window hides it and the app is meant to
-  // keep recording in the tray on every platform. Shutdown destroys the window itself and then exits
-  // explicitly — a competing `app.quit()` from here would race the ordered shutdown and could cut it
-  // off half-finished.
+  // Closing the window only hides it, so the app is meant to keep recording in the tray. Electron's
+  // default is to quit once the last window closes (on every platform except macOS), and shutdown
+  // destroys that window itself — so an explicit no-op handler suppresses the default without
+  // starting a quit of its own that would race the ordered shutdown.
+  app.on('window-all-closed', () => {
+    /* the tray keeps the app alive */
+  });
 
   app.on('before-quit', (event) => {
     // ⌘Q, the app menu's Quit, the dock and a system logout all arrive here. Without this the
     // process would exit with the samplers still running and SQLite never closed; instead take
     // over the quit and run the same ordered shutdown the tray uses.
-    if (quitting) return;
+    //
+    // Always preventDefault, including while a shutdown is already running: this handler takes over
+    // the quit, and a second one must never cut the ordered shutdown short. Real sources of a second
+    // quit are a double ⌘Q, the updater's own quit, and Electron's default window-all-closed quit —
+    // any of which would otherwise end the process between 'Embedded server stopped' and 'Goodbye',
+    // leaving the database without its final checkpoint.
     event.preventDefault();
+    if (quitting) return;
     void shutdown('quit');
   });
 

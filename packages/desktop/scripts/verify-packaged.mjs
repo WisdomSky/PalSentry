@@ -147,15 +147,21 @@ async function freePort() {
   });
 }
 
+// Every request asks for `Connection: close`. The app's shutdown waits for keep-alive sockets to
+// drain, so a pooled socket of our own would make Fastify's close() run into the shell's 5-second
+// grace period instead of finishing — which skips the 'Embedded server stopped' line asserted below
+// and can leave the database without its checkpoint.
+const CLOSE = { connection: 'close' };
+
 async function getJson(url) {
-  const response = await fetch(url);
+  const response = await fetch(url, { headers: CLOSE });
   return { status: response.status, body: await response.json().catch(() => null) };
 }
 
 async function postJson(url, body) {
   const response = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...CLOSE },
     body: JSON.stringify(body),
   });
   return { status: response.status, body: await response.json().catch(() => null) };
@@ -164,7 +170,7 @@ async function postJson(url, body) {
 async function putJson(url, body) {
   const response = await fetch(url, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...CLOSE },
     body: JSON.stringify(body),
   });
   return { status: response.status, body: await response.json().catch(() => null) };
@@ -429,8 +435,10 @@ const child = spawn(
 
 let origin = null;
 let exited = false;
-child.on('exit', () => {
+let exitDescription = 'still running';
+child.on('exit', (code, signal) => {
   exited = true;
+  exitDescription = signal === null ? `exit code ${code}` : `killed by ${signal}`;
 });
 
 async function stopApp() {
@@ -473,7 +481,7 @@ try {
   });
 
   await check('serves the built SPA', async () => {
-    const response = await fetch(`${origin}/`);
+    const response = await fetch(`${origin}/`, { headers: CLOSE });
     const html = await response.text();
     assert(response.status === 200, `GET / returned ${response.status}`);
     assert(html.includes('id="app"'), 'the SPA mount point is missing from the served HTML');
@@ -734,10 +742,21 @@ try {
   await check('shuts down cleanly', async () => {
     await stopApp();
     const messages = await logMessages(mainLogPath);
-    assert(messages.includes('Shutting down'), 'no shutdown was logged');
-    assert(messages.includes('Embedded server stopped'), 'the embedded server was not closed');
-    assert(messages.includes('Goodbye'), 'shutdown did not finish');
-    assert(!existsSync(`${databasePath}-wal`), 'SQLite left a write-ahead log behind');
+    // A process that dies mid-shutdown is what a second quit looks like, and job logs need admin
+    // rights to read afterwards, so carry the evidence in the failure itself.
+    const tail = (await readLogLines(mainLogPath))
+      .slice(-5)
+      .map((entry) => String(entry.msg ?? ''))
+      .filter((message) => message !== '')
+      .join(' | ');
+    const detail = `app ${exitDescription}; main.log tail: ${tail === '' ? '(empty)' : tail}`;
+    assert(messages.includes('Shutting down'), `no shutdown was logged (${detail})`);
+    assert(
+      messages.includes('Embedded server stopped'),
+      `the embedded server was not closed (${detail})`,
+    );
+    assert(messages.includes('Goodbye'), `shutdown did not finish (${detail})`);
+    assert(!existsSync(`${databasePath}-wal`), `SQLite left a write-ahead log behind (${detail})`);
 
     return 'ordered shutdown, database checkpointed';
   });
