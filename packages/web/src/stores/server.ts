@@ -6,8 +6,14 @@ import type {
   RestartStatusResponse,
   StatusResponse,
 } from '@palsentry/shared';
-import { isOnlinePlayer, isRestartSettled } from '@palsentry/shared';
+import {
+  DEFAULT_WAYBACK_INTERVAL_SECONDS,
+  WAYBACK_INTERVAL_OPTIONS,
+  isOnlinePlayer,
+  isRestartSettled,
+} from '@palsentry/shared';
 import { api, errorMessage } from '@/lib/api';
+import { formatInterval } from '@/lib/format';
 import { useSessionStore } from './session';
 import { useUiStore } from './ui';
 
@@ -65,6 +71,58 @@ export const useServerStore = defineStore('server', () => {
   /** True while the capability probe has not answered yet. */
   const metaLoaded = computed(() => meta.value !== null);
   const destructiveAllowed = computed(() => meta.value?.destructiveAllowed === true);
+
+  /**
+   * How often the server records player positions.
+   *
+   * Server-wide rather than per-browser: recording continues while everyone has the dashboard
+   * closed, which is the only way the history is worth having. `meta` is the single source of
+   * truth, so a change is reflected here by patching it.
+   */
+  const waybackIntervalSeconds = computed(
+    () => meta.value?.history.waybackIntervalSeconds ?? DEFAULT_WAYBACK_INTERVAL_SECONDS,
+  );
+  const waybackIntervalOptions = computed<readonly number[]>(
+    () => meta.value?.history.waybackIntervalOptions ?? WAYBACK_INTERVAL_OPTIONS,
+  );
+  const waybackIntervalSaving = ref(false);
+
+  /**
+   * Change the recording cadence.
+   *
+   * Resolves true when the server accepted the value. Failures are reported as a toast and leave
+   * the previous interval in force, because the selector's value is `meta`, not optimistic state:
+   * there is no UI state to roll back and no chance of the header claiming a cadence the server
+   * is not using.
+   */
+  async function updateWaybackInterval(seconds: number): Promise<boolean> {
+    if (waybackIntervalSaving.value) return false;
+    waybackIntervalSaving.value = true;
+
+    try {
+      const updated = await api.updateWaybackSettings({ intervalSeconds: seconds });
+      if (meta.value !== null) {
+        meta.value = {
+          ...meta.value,
+          history: {
+            ...meta.value.history,
+            waybackIntervalSeconds: updated.intervalSeconds,
+            waybackIntervalOptions: updated.intervalOptions,
+          },
+        };
+      }
+      ui.success(
+        'Recording interval updated',
+        `Player positions are now recorded every ${formatInterval(updated.intervalSeconds)}.`,
+      );
+      return true;
+    } catch (cause) {
+      ui.error('Could not change the recording interval', errorMessage(cause));
+      return false;
+    } finally {
+      waybackIntervalSaving.value = false;
+    }
+  }
 
   const restartInFlight = computed(
     () => restart.value !== null && !isRestartSettled(restart.value.state),
@@ -213,6 +271,10 @@ export const useServerStore = defineStore('server', () => {
     maxPlayers,
     metaLoaded,
     destructiveAllowed,
+    waybackIntervalSeconds,
+    waybackIntervalOptions,
+    waybackIntervalSaving,
+    updateWaybackInterval,
     restartInFlight,
     loadMeta,
     refresh,

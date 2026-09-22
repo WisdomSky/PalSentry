@@ -8,7 +8,11 @@ import type {
   SettingsResponse,
   StatusResponse,
 } from '@palsentry/shared';
-import { DEFAULT_POLL_INTERVAL_MS, POLL_INTERVAL_OPTIONS } from '@palsentry/shared';
+import {
+  DEFAULT_POLL_INTERVAL_MS,
+  POLL_INTERVAL_OPTIONS,
+  WAYBACK_INTERVAL_OPTIONS,
+} from '@palsentry/shared';
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
 import { toStatusError } from '../http/errors.js';
@@ -36,6 +40,10 @@ export function metaRoutes(ctx: AppContext) {
         history: {
           retentionDays: ctx.config.history.retentionDays,
           sampleIntervalSeconds: ctx.config.history.sampleIntervalSeconds,
+          // Position recording is a server-wide setting rather than deployment configuration, so
+          // this reports the interval actually in force, not a default the UI would have to guess.
+          waybackIntervalSeconds: ctx.playerHistory.intervalSeconds,
+          waybackIntervalOptions: [...WAYBACK_INTERVAL_OPTIONS],
         },
         restart: {
           defaultWaitSeconds: ctx.config.restart.defaultWaitSeconds,

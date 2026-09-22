@@ -15,7 +15,7 @@
   ],
   "scripts": {
     "dev": "concurrently -n server,web -c cyan,magenta \"npm:dev:server\" \"npm:dev:web\"",
-    "dev:server": "node --env-file-if-exists=.env --import tsx --watch packages/server/src/index.ts",
+    "dev:server": "tsx watch --env-file-if-exists=.env packages/server/src/index.ts",
     "dev:web": "npm run dev -w @palsentry/web",
     "build": "npm run build -w @palsentry/web && npm run build -w @palsentry/server",
     "start": "node --env-file-if-exists=.env packages/server/dist/index.js",

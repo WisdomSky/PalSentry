@@ -21,6 +21,22 @@ export function formatDuration(ms: number | null): string {
   return formatUptime(ms / 1000);
 }
 
+/**
+ * A recording interval, as short as it can be without being ambiguous: `5s`, `1m`, `5m`.
+ *
+ * Deliberately not {@link formatUptime}: that reports a duration that has elapsed (`1m 0s`),
+ * whereas this names a choice the operator picks from a list.
+ */
+export function formatInterval(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '—';
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  if (seconds < 3_600) {
+    const minutes = seconds / 60;
+    return `${Number.isInteger(minutes) ? minutes : Math.round(minutes * 10) / 10}m`;
+  }
+  return `${Math.round((seconds / 3_600) * 10) / 10}h`;
+}
+
 /** `2026-09-20T20:54:41.537Z` → `20:54:41`. */
 export function formatTime(iso: string | null): string {
   if (iso === null) return '—';

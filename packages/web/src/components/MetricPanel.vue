@@ -6,7 +6,7 @@ import { useMetricHistory } from '@/composables/useMetricHistory';
 import { useMetricsStore, type MetricKey } from '@/stores/metrics';
 import { useServerStore } from '@/stores/server';
 import MetricChart from './MetricChart.vue';
-import MetricRangeFilter from './MetricRangeFilter.vue';
+import HistoryRangeFilter from './HistoryRangeFilter.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -73,7 +73,7 @@ const isEmpty = computed(() => response.value !== null && response.value.samples
           {{ description }}
         </p>
       </div>
-      <MetricRangeFilter
+      <HistoryRangeFilter
         :model-value="selection"
         :retention-days="retentionDays"
         class="ml-auto"

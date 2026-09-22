@@ -9,15 +9,20 @@ const props = withDefaults(
     /** Days of history the server keeps; bounds a custom range and its validation message. */
     retentionDays: number;
     label?: string;
+    /**
+     * Where a freshly chosen custom range starts, in seconds before now.
+     *
+     * The metric charts want a handful of samples (`6h`), while the wayback map wants a whole
+     * session's worth to scrub through (`24h`), and both should open on something familiar.
+     */
+    defaultCustomSpanSeconds?: number;
   }>(),
-  { label: 'Range' },
+  { label: 'Range', defaultCustomSpanSeconds: 6 * 60 * 60 },
 );
 
 const emit = defineEmits<{ 'update:modelValue': [HistorySelection] }>();
 
 const SECONDS_PER_DAY = 24 * 60 * 60;
-/** Matches the default preset so picking Custom starts somewhere familiar. */
-const DEFAULT_CUSTOM_SPAN = 6 * 60 * 60;
 
 const retentionSeconds = computed(
   () => Math.max(1, Math.floor(props.retentionDays)) * SECONDS_PER_DAY,
@@ -31,7 +36,7 @@ function recentRange(): { from: number; to: number } {
   // Whole minutes, so the drafts seeded into the inputs match the applied value exactly and Apply
   // does not look pending the moment Custom is chosen.
   const to = Math.floor(Date.now() / 60_000) * 60;
-  const span = Math.min(DEFAULT_CUSTOM_SPAN, retentionSeconds.value);
+  const span = Math.min(props.defaultCustomSpanSeconds, retentionSeconds.value);
   return { from: Math.max(0, to - span), to };
 }
 

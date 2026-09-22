@@ -6,6 +6,7 @@ import { actionRoutes } from './actions.js';
 import { auditRoutes } from './audit.js';
 import { bansRoutes } from './bans.js';
 import { historyRoutes } from './history.js';
+import { playerHistoryRoutes } from './player-history.js';
 import { publicApiRoutes } from './public.js';
 import { restartRoutes } from './restart.js';
 
@@ -32,6 +33,7 @@ export function protectedApiRoutes(ctx: AppContext) {
     await app.register(bansRoutes(ctx));
     await app.register(auditRoutes(ctx));
     await app.register(historyRoutes(ctx));
+    await app.register(playerHistoryRoutes(ctx));
     await app.register(restartRoutes(ctx));
   };
 }

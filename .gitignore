@@ -19,6 +19,7 @@ data/
 public/map/
 map/
 plans/
+PLAN.md
 
 # Editor / OS
 .DS_Store

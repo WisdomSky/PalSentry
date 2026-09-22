@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue';
 import { AlertTriangle, RefreshCw, Server, ShieldAlert, Users } from '@lucide/vue';
 import type { EnrichedPlayer } from '@palsentry/shared';
-import { formatUptime } from '@/lib/format';
+import { formatInterval, formatUptime } from '@/lib/format';
 import { useServerStore } from '@/stores/server';
 import EmptyState from '@/components/EmptyState.vue';
 import OfflineBanner from '@/components/OfflineBanner.vue';
@@ -31,6 +31,11 @@ function openAction(kind: 'kick' | 'ban' | 'unban', player: EnrichedPlayer): voi
 function showInMap(player: EnrichedPlayer): void {
   void router.push({ name: 'map', query: { track: player.userId } });
 }
+
+function onIntervalChange(event: Event): void {
+  const value = Number((event.target as HTMLSelectElement).value);
+  void server.updateWaybackInterval(value);
+}
 </script>
 
 <template>
@@ -58,19 +63,42 @@ function showInMap(player: EnrichedPlayer): void {
         </p>
       </div>
 
-      <button
-        type="button"
-        class="btn-secondary btn-xs"
-        :disabled="server.loading"
-        @click="server.refreshNow()"
-      >
-        <RefreshCw
-          class="h-3.5 w-3.5"
-          :class="server.loading ? 'animate-spin' : ''"
-          aria-hidden="true"
-        />
-        Refresh
-      </button>
+      <div class="flex flex-wrap items-center gap-2">
+        <label
+          class="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400"
+          title="How often the server records player positions. Recording continues while no dashboard is open."
+        >
+          <span>Record every</span>
+          <select
+            class="input w-auto py-1 text-xs"
+            :value="server.waybackIntervalSeconds"
+            :disabled="server.waybackIntervalSaving"
+            @change="onIntervalChange"
+          >
+            <option
+              v-for="seconds in server.waybackIntervalOptions"
+              :key="seconds"
+              :value="seconds"
+            >
+              {{ formatInterval(seconds) }}
+            </option>
+          </select>
+        </label>
+
+        <button
+          type="button"
+          class="btn-secondary btn-xs"
+          :disabled="server.loading"
+          @click="server.refreshNow()"
+        >
+          <RefreshCw
+            class="h-3.5 w-3.5"
+            :class="server.loading ? 'animate-spin' : ''"
+            aria-hidden="true"
+          />
+          Refresh
+        </button>
+      </div>
     </div>
 
     <OfflineBanner

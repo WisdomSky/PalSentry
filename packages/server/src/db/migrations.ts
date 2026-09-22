@@ -114,6 +114,91 @@ const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 3,
+    name: 'wayback player position history',
+    up: (db) => {
+      db.exec(`
+        -- Persisted recording cadence for wayback position sampling. A single row (id = 1) rather
+        -- than a key/value table: there is exactly one interval, and the CHECK keeps a buggy
+        -- writer from parking an absurd cadence in the database.
+        CREATE TABLE wayback_settings (
+          id               INTEGER PRIMARY KEY CHECK (id = 1),
+          interval_seconds INTEGER NOT NULL CHECK (interval_seconds > 0),
+          updated_at       TEXT    NOT NULL
+        );
+
+        INSERT INTO wayback_settings (id, interval_seconds, updated_at)
+        VALUES (1, 60, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+
+        -- One row per successful background observation, including observations where nobody was
+        -- online: "the server answered and the world was empty" is a fact worth keeping, and
+        -- without it the timeline could not distinguish an outage from an empty server.
+        --
+        -- Gaps in captured_at are real: failed reads leave no row, so the trail breaks there
+        -- rather than drawing a straight line across an outage.
+        CREATE TABLE player_position_snapshots (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          captured_at  INTEGER NOT NULL UNIQUE,
+          player_count INTEGER NOT NULL,
+          -- 1 for rows synthesised once from the pre-upgrade roster, which recorded only each
+          -- player's latest sighting. They are usable as history but are not timeline ticks.
+          synthetic    INTEGER NOT NULL DEFAULT 0 CHECK (synthetic IN (0, 1))
+        );
+
+        -- The unique index on captured_at doubles as the range-scan index for both history
+        -- queries and retention pruning, so no separate index is needed.
+
+        -- Positions observed in one snapshot. captured_at is denormalised from the parent so the
+        -- per-player lookups ("where was this player last, before time T?") never need a join;
+        -- the price is 8 bytes per row on the largest table in the schema.
+        --
+        -- Storage scales with the configured cadence: the 60-second default is roughly 12k rows
+        -- per day, while the 5-second option is roughly 138k per day, per player online.
+        CREATE TABLE player_positions (
+          snapshot_id INTEGER NOT NULL REFERENCES player_position_snapshots(id) ON DELETE CASCADE,
+          captured_at INTEGER NOT NULL,
+          userid      TEXT    NOT NULL,
+          name        TEXT    NOT NULL,
+          level       INTEGER NOT NULL,
+          location_x  REAL    NOT NULL,
+          location_y  REAL    NOT NULL,
+          PRIMARY KEY (snapshot_id, userid)
+        );
+
+        -- Serves both the in-range scan and the "latest point at or before T" baseline lookup.
+        CREATE INDEX idx_player_positions_player_time ON player_positions(userid, captured_at);
+
+        -- Recover what the roster already knows. Older positions cannot be reconstructed, but
+        -- each roster row's last_online_at was a genuine successful observation, so it can seed
+        -- the map instead of leaving the new feature blank until the first tick.
+        INSERT INTO player_position_snapshots (captured_at, player_count, synthetic)
+        SELECT CAST(strftime('%s', last_online_at) AS INTEGER), 0, 1
+        FROM players
+        WHERE strftime('%s', last_online_at) IS NOT NULL
+        GROUP BY CAST(strftime('%s', last_online_at) AS INTEGER);
+
+        INSERT INTO player_positions (snapshot_id, captured_at, userid, name, level, location_x, location_y)
+        SELECT s.id,
+               s.captured_at,
+               p.userid,
+               p.name,
+               p.level,
+               p.location_x,
+               p.location_y
+        FROM players p
+        JOIN player_position_snapshots s
+          ON s.captured_at = CAST(strftime('%s', p.last_online_at) AS INTEGER)
+        WHERE s.synthetic = 1;
+
+        UPDATE player_position_snapshots
+        SET player_count = (
+          SELECT COUNT(*) FROM player_positions WHERE snapshot_id = player_position_snapshots.id
+        )
+        WHERE synthetic = 1;
+      `);
+    },
+  },
 ];
 
 /** The newest schema version this build knows how to produce. */
@@ -171,4 +256,27 @@ export function pruneMetricSamples(db: Db, retentionDays: number, now = Date.now
   const cutoffSeconds = Math.floor(now / 1000) - retentionDays * 24 * 60 * 60;
   const result = db.prepare('DELETE FROM metric_samples WHERE ts < ?').run(cutoffSeconds);
   return result.changes;
+}
+
+/**
+ * Delete wayback position history older than the retention window.
+ *
+ * There is no metric equivalent to delete: bans and audit rows are kept forever. Returns the
+ * number of observations removed.
+ *
+ * Positions are deleted first. The foreign key would cascade them when the parent goes, but the
+ * explicit order means the cleanup still holds if the connection was opened without foreign key
+ * enforcement, and it keeps the boundary exact for both tables.
+ */
+export function prunePlayerHistory(db: Db, retentionDays: number, now = Date.now()): number {
+  const cutoffSeconds = Math.floor(now / 1000) - retentionDays * 24 * 60 * 60;
+
+  const prune = db.transaction(() => {
+    db.prepare('DELETE FROM player_positions WHERE captured_at < ?').run(cutoffSeconds);
+    return db
+      .prepare('DELETE FROM player_position_snapshots WHERE captured_at < ?')
+      .run(cutoffSeconds).changes;
+  });
+
+  return prune();
 }

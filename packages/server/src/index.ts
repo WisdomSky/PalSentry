@@ -50,9 +50,9 @@ async function main(): Promise<void> {
   const app = await buildApp(ctx);
 
   // Start sampling only in the real entrypoint, never in `buildApp`, so tests do not acquire
-  // background timers that keep the process alive. Both observers run concurrently: metrics and
-  // the player roster are independent reads, and one should not wait on the other.
-  await Promise.all([ctx.metrics.start(), ctx.players.start()]);
+  // background timers that keep the process alive. All three run concurrently: metrics and the
+  // player read are independent requests, and the recording timer must not wait on either.
+  await Promise.all([ctx.metrics.start(), ctx.playerHistory.start()]);
 
   /**
    * Stop cleanly so Docker's `docker stop` does not have to resort to SIGKILL, which would

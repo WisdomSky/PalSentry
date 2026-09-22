@@ -1,4 +1,10 @@
-import { DEFAULT_HISTORY_WINDOW, type HistorySelection } from '@palsentry/shared';
+import {
+  DEFAULT_HISTORY_WINDOW,
+  WAYBACK_INTERVAL_OPTIONS,
+  isWaybackInterval,
+  type HistorySelection,
+  type HistoryWindow,
+} from '@palsentry/shared';
 import { z } from 'zod';
 
 /**
@@ -87,8 +93,17 @@ const unixSecondsField = z.coerce
   .positive('must be later than the Unix epoch.')
   .max(Number.MAX_SAFE_INTEGER, 'is too large.');
 
-/** Validate either one rolling preset or one complete, retention-bounded absolute range. */
-export function historyQuerySchema(retentionDays: number) {
+/**
+ * Validate either one rolling preset or one complete, retention-bounded absolute range.
+ *
+ * `defaultWindow` is the preset used when neither a window nor a range is supplied; the wayback
+ * map overrides it because a day of movement is the useful default there, while the metrics
+ * charts keep their shorter one.
+ */
+export function historyQuerySchema(
+  retentionDays: number,
+  defaultWindow: HistoryWindow = DEFAULT_HISTORY_WINDOW,
+) {
   const maximumSpan = Math.max(1, Math.floor(retentionDays)) * SECONDS_PER_DAY;
 
   return z
@@ -140,9 +155,26 @@ export function historyQuerySchema(retentionDays: number) {
       if (query.from !== undefined && query.to !== undefined) {
         return { kind: 'range', from: query.from, to: query.to };
       }
-      return { kind: 'window', window: query.window ?? DEFAULT_HISTORY_WINDOW };
+      return { kind: 'window', window: query.window ?? defaultWindow };
     });
 }
+
+/**
+ * The wayback recording cadence.
+ *
+ * Strict about the offered values rather than accepting any positive integer: the cadence is a
+ * request rate against the game server and a storage rate against SQLite, and an operator typing
+ * `1` into a number field should be told the choices rather than quietly sampling every second
+ * forever.
+ */
+export const waybackSettingsSchema = z.object({
+  intervalSeconds: z
+    .number({ error: 'intervalSeconds must be a number of seconds.' })
+    .int('intervalSeconds must be a whole number of seconds.')
+    .refine(isWaybackInterval, {
+      error: `intervalSeconds must be one of ${WAYBACK_INTERVAL_OPTIONS.join(', ')} seconds.`,
+    }),
+});
 
 export const auditQuerySchema = z.object({
   action: z.string().trim().max(50).optional(),

@@ -259,11 +259,19 @@ npm run dev
 
 Open <http://localhost:5173>. Vite proxies `/api` to the Node process on port 3000, preserving the same-origin behavior used in production.
 
-A development compose override is also available:
+A development compose override is also available. It carries the required Palworld connection settings, so both forms start the same development container:
 
 ```sh
+# Layered over the base service (inherits the full environment mapping and hardening).
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+
+# On its own, using the same shell or .env values.
+docker compose -f docker-compose.dev.yml up --build
 ```
+
+Either way, `PALWORLD_REST_URL` and `PALWORLD_ADMIN_PASSWORD` must be exported or present in `.env`; Compose stops with a clear error when they are missing. The container runs `npm run dev`, which reloads the API on changes under `packages/server/src` and `packages/shared/src` and the SPA through Vite.
+
+The API runs through `tsx watch` — the same runner as the server workspace's own `dev` script — rather than `node --watch`. Node's watch mode registers the optional `.env` from `--env-file-if-exists` with its file watcher even when the file is absent, which crashes startup on Linux with Node 22 (`ENOENT: no such file or directory, watch '/app/.env'`). The container never has an `.env`, because Compose passes the values in as environment variables, so the watch has to tolerate its absence.
 
 ### Try it without Palworld
 

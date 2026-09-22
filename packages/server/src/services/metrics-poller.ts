@@ -1,6 +1,5 @@
 import {
   DEFAULT_HISTORY_WINDOW,
-  HISTORY_MAX_POINTS,
   type HistoryResponse,
   type HistorySample,
   type HistorySelection,
@@ -11,6 +10,7 @@ import { pruneMetricSamples } from '../db/migrations.js';
 import type { Logger } from '../logger.js';
 import { PalworldError } from '../palworld/errors.js';
 import type { PalworldClient } from '../palworld/client.js';
+import { resolveHistoryRange } from './history-range.js';
 
 /**
  * Background sampler that turns the Palworld API's point-in-time `/metrics` snapshot into a
@@ -21,62 +21,6 @@ import type { PalworldClient } from '../palworld/client.js';
  * is spotting lag spikes and peak hours, not high-resolution telemetry, and every sample is a
  * request the game server has to serve.
  */
-
-/** Window definitions, and how far each is downsampled. */
-const WINDOW_SECONDS: Record<HistoryWindow, number> = {
-  '1h': 60 * 60,
-  '6h': 6 * 60 * 60,
-  '24h': 24 * 60 * 60,
-  '7d': 7 * 24 * 60 * 60,
-  '30d': 30 * 24 * 60 * 60,
-};
-
-/**
- * Bucket size per window, chosen to yield a few hundred points.
- *
- * More than that is wasted on a chart a few hundred pixels wide, and fewer makes a lag spike
- * invisible. Buckets are never finer than the sample interval, since that would just interleave
- * empty buckets.
- */
-const BUCKET_SECONDS: Record<HistoryWindow, number> = {
-  '1h': 60,
-  '6h': 120,
-  '24h': 300,
-  '7d': 1800,
-  '30d': 7200,
-};
-
-const CUSTOM_BUCKET_TIERS: readonly { maximumSpan: number; bucketSeconds: number }[] = [
-  { maximumSpan: WINDOW_SECONDS['1h'], bucketSeconds: BUCKET_SECONDS['1h'] },
-  { maximumSpan: WINDOW_SECONDS['6h'], bucketSeconds: BUCKET_SECONDS['6h'] },
-  { maximumSpan: WINDOW_SECONDS['24h'], bucketSeconds: BUCKET_SECONDS['24h'] },
-  { maximumSpan: WINDOW_SECONDS['7d'], bucketSeconds: BUCKET_SECONDS['7d'] },
-  { maximumSpan: WINDOW_SECONDS['30d'], bucketSeconds: BUCKET_SECONDS['30d'] },
-];
-
-/** Round up to a compact 1/2/5 × 10ⁿ progression. */
-function niceBucketCeiling(seconds: number): number {
-  const safe = Math.max(1, Math.ceil(seconds));
-  const magnitude = 10 ** Math.floor(Math.log10(safe));
-  const normalized = safe / magnitude;
-  const multiplier = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
-  return multiplier * magnitude;
-}
-
-/** Choose a bounded custom-range bucket while retaining familiar buckets for ranges up to 30d. */
-export function customHistoryBucketSeconds(
-  spanSeconds: number,
-  sampleIntervalSeconds: number,
-): number {
-  const span = Number.isFinite(spanSeconds) ? Math.max(1, Math.ceil(spanSeconds)) : 1;
-  const interval = Number.isFinite(sampleIntervalSeconds)
-    ? Math.max(1, Math.ceil(sampleIntervalSeconds))
-    : 1;
-  const tier = CUSTOM_BUCKET_TIERS.find(({ maximumSpan }) => span <= maximumSpan);
-  if (tier !== undefined) return Math.max(interval, tier.bucketSeconds);
-
-  return Math.max(interval, niceBucketCeiling(span / HISTORY_MAX_POINTS));
-}
 
 interface HistoryRow {
   bucket_ts: number;
@@ -277,30 +221,11 @@ export class MetricsPoller {
     },
     now: number = Date.now(),
   ): HistoryResponse {
-    const selection: HistorySelection =
-      typeof requested === 'string' ? { kind: 'window', window: requested } : requested;
-    const to = selection.kind === 'window' ? Math.floor(now / 1_000) : Math.floor(selection.to);
-    const from =
-      selection.kind === 'window'
-        ? to - WINDOW_SECONDS[selection.window]
-        : Math.floor(selection.from);
-
-    if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 0 || to <= from) {
-      throw new RangeError('History boundaries must be ordered positive Unix-second integers.');
-    }
-
-    const spanSeconds = to - from;
-    if (selection.kind === 'range' && spanSeconds > this.retentionDays * 24 * 60 * 60) {
-      throw new RangeError('History range exceeds the configured retention period.');
-    }
-
-    const bucketSeconds =
-      selection.kind === 'window'
-        ? BUCKET_SECONDS[selection.window]
-        : customHistoryBucketSeconds(spanSeconds, this.intervalSeconds);
-    // Presets retain their established epoch-aligned buckets. Custom buckets start at the exact
-    // requested boundary so the first chart point never predates the selected range.
-    const anchor = selection.kind === 'range' ? from : 0;
+    const { selection, window, from, to, bucketSeconds, anchor } = resolveHistoryRange(requested, {
+      retentionDays: this.retentionDays,
+      sampleIntervalSeconds: this.intervalSeconds,
+      now,
+    });
 
     const rows = this.db
       .prepare(
@@ -334,7 +259,7 @@ export class MetricsPoller {
 
     return {
       selection,
-      window: selection.kind === 'window' ? selection.window : null,
+      window,
       from,
       to,
       bucketSeconds,

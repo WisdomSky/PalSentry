@@ -13,6 +13,7 @@ import type {
   LoginRequest,
   MeResponse,
   MetaResponse,
+  PlayerHistoryResponse,
   PlayersResponse,
   RestartRequest,
   RestartStatusResponse,
@@ -20,6 +21,8 @@ import type {
   ShutdownRequest,
   StatusResponse,
   UnbanRequest,
+  WaybackSettingsRequest,
+  WaybackSettingsResponse,
 } from '@palsentry/shared';
 
 /** An error returned by the PalSentry API, carrying the machine-readable code. */
@@ -147,6 +150,28 @@ function post<T>(path: string, body?: unknown): Promise<T> {
   });
 }
 
+function put<T>(path: string, body: unknown): Promise<T> {
+  return request<T>(path, { method: 'PUT', body: JSON.stringify(body) });
+}
+
+/**
+ * A history selection as query parameters.
+ *
+ * Shared by the metric charts and the wayback map: both ask the same endpoint-shaped question,
+ * and the server validates both with the same rules, so the encoding lives in one place.
+ */
+function historySearch(selection: HistorySelection): string {
+  const search = new URLSearchParams();
+  if (selection.kind === 'window') {
+    search.set('window', selection.window);
+  } else {
+    // The server validates these as whole Unix seconds, so no ISO formatting round-trip here.
+    search.set('from', String(selection.from));
+    search.set('to', String(selection.to));
+  }
+  return search.toString();
+}
+
 /** Typed wrappers for every endpoint the UI uses. */
 export const api = {
   health: () => request<HealthResponse>('/health'),
@@ -160,17 +185,13 @@ export const api = {
   players: () => request<PlayersResponse>('/players'),
   bases: (refresh = false) => request<BasesResponse>(`/bases${refresh ? '?refresh=true' : ''}`),
   settings: () => request<SettingsResponse>('/settings'),
-  history: (selection: HistorySelection) => {
-    const search = new URLSearchParams();
-    if (selection.kind === 'window') {
-      search.set('window', selection.window);
-    } else {
-      // The server validates these as whole Unix seconds, so no ISO formatting round-trip here.
-      search.set('from', String(selection.from));
-      search.set('to', String(selection.to));
-    }
-    return request<HistoryResponse>(`/history?${search.toString()}`);
-  },
+  history: (selection: HistorySelection) =>
+    request<HistoryResponse>(`/history?${historySearch(selection)}`),
+
+  playerHistory: (selection: HistorySelection) =>
+    request<PlayerHistoryResponse>(`/player-history?${historySearch(selection)}`),
+  updateWaybackSettings: (body: WaybackSettingsRequest) =>
+    put<WaybackSettingsResponse>('/player-history/settings', body),
 
   bans: () => request<BansResponse>('/bans'),
   deleteBan: (id: number) => request<void>(`/bans/${id}`, { method: 'DELETE' }),

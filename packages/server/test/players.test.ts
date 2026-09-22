@@ -76,9 +76,13 @@ describe('players migration', () => {
   it('upgrades a version 1 database without losing its existing tables', () => {
     const dbPath = tempDbPath();
 
-    // Simulate the database an operator has on disk today: schema version 1, which has no
-    // players table. Everything else must come through the upgrade untouched.
+    // Simulate the database an operator has on disk today: schema version 1, which has neither
+    // the roster nor any wayback storage. Everything else must come through the upgrade
+    // untouched. Children are dropped first so the foreign key never has to be violated.
     const legacy = openDatabase(dbPath, logger);
+    legacy.exec('DROP TABLE player_positions');
+    legacy.exec('DROP TABLE player_position_snapshots');
+    legacy.exec('DROP TABLE wayback_settings');
     legacy.exec('DROP TABLE players');
     legacy.pragma('user_version = 1');
     legacy.close();
@@ -91,7 +95,15 @@ describe('players migration', () => {
         .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
         .all() as { name: string }[]
     ).map((table) => table.name);
-    for (const expected of ['players', 'bans', 'audit', 'metric_samples']) {
+    for (const expected of [
+      'players',
+      'bans',
+      'audit',
+      'metric_samples',
+      'wayback_settings',
+      'player_position_snapshots',
+      'player_positions',
+    ]) {
       assert.ok(tables.includes(expected), `expected table ${expected} after the upgrade`);
     }
     upgraded.close();
@@ -380,26 +392,28 @@ describe('PlayerService observation', () => {
     assert.equal(testApp.ctx.players.count(), 2);
   });
 
-  it('takes its first sample when the observer starts', async () => {
+  it('records a snapshot when the recorder starts', async () => {
     const testApp = await createTestApp();
     apps.push(testApp);
 
-    assert.equal(testApp.ctx.players.count(), 0, 'nothing is observed before start()');
-    await testApp.ctx.players.start();
+    assert.equal(testApp.ctx.playerHistory.count(), 0, 'nothing is recorded before start()');
+    await testApp.ctx.playerHistory.start();
+    assert.equal(testApp.ctx.playerHistory.count(), 1);
     assert.equal(testApp.ctx.players.count(), 2);
 
-    await testApp.ctx.players.stop();
+    await testApp.ctx.playerHistory.stop();
   });
 
   it('tolerates being started and stopped more than once', async () => {
     const testApp = await createTestApp();
     apps.push(testApp);
 
-    await testApp.ctx.players.start();
-    await testApp.ctx.players.start(); // no-op
-    await testApp.ctx.players.stop();
-    await testApp.ctx.players.stop(); // safe when already stopped
+    await testApp.ctx.playerHistory.start();
+    await testApp.ctx.playerHistory.start(); // no-op
+    await testApp.ctx.playerHistory.stop();
+    await testApp.ctx.playerHistory.stop(); // safe when already stopped
 
+    assert.equal(testApp.ctx.playerHistory.count(), 1);
     assert.equal(testApp.ctx.players.count(), 2);
   });
 
@@ -409,9 +423,10 @@ describe('PlayerService observation', () => {
     });
     apps.push(testApp);
 
-    await testApp.ctx.players.start();
+    await testApp.ctx.playerHistory.start();
     // stop() waits for the in-flight read rather than closing the database underneath it.
     const pending = testApp.ctx.players.refresh();
+    await testApp.ctx.playerHistory.stop();
     await testApp.ctx.players.stop();
     assert.equal((await pending).ok, true);
   });

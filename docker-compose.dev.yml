@@ -1,5 +1,6 @@
-# Development with hot reload:
+# Development with hot reload. Layer it over the base service or run it on its own; both work:
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+#   docker compose -f docker-compose.dev.yml up --build
 # Open http://localhost:5173. Vite proxies /api to the Node server in the same container.
 # Source-only edits reload immediately; rebuild after changing dependencies or TS configuration.
 services:
@@ -15,11 +16,24 @@ services:
     environment:
       NODE_ENV: development
       VITE_DEV_HOST: 0.0.0.0
+
+      # Repeated from the base service so this file also works without it. Layering supplies the
+      # same values, because both files interpolate the same shell or .env variables.
+      PALSENTRY_PORT: '3000'
+      PALSENTRY_HOST: '0.0.0.0'
+      PALSENTRY_DATA_DIR: '/data'
+      PALWORLD_REST_URL: '${PALWORLD_REST_URL:?PALWORLD_REST_URL is required}'
+      PALWORLD_ADMIN_PASSWORD: '${PALWORLD_ADMIN_PASSWORD:?PALWORLD_ADMIN_PASSWORD is required}'
+
     ports:
       - '5173:5173'
     volumes:
-      # Configuration is inherited from the base service's environment mapping. Mount only source
-      # files, never an .env file or the host's node_modules/native SQLite binary.
+      # The base service's database mount. Development writes to the same ./data directory as a
+      # production container started from this checkout; point PALSENTRY_DB_PATH at a scratch
+      # directory if that is not what you want.
+      - ./data:/data
+
+      # Mount only source files, never an .env file or the host's node_modules/native SQLite binary.
       - ./packages/server/src:/app/packages/server/src:ro
       - ./packages/shared/src:/app/packages/shared/src:ro
       - ./packages/web/src:/app/packages/web/src:ro

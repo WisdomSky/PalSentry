@@ -9,6 +9,7 @@ import {
   SCHEMA_VERSION,
   getSchemaVersion,
   pruneMetricSamples,
+  prunePlayerHistory,
   runMigrations,
 } from '../src/db/migrations.js';
 
@@ -214,6 +215,170 @@ describe('audit table', () => {
     assert.equal(row.error, 'Connection refused');
     assert.equal(row.http_status, 502);
     db.close();
+  });
+});
+
+describe('wayback position history', () => {
+  function insertSnapshot(db: ReturnType<typeof memoryDb>, ts: number, players: number): number {
+    const result = db
+      .prepare('INSERT INTO player_position_snapshots (captured_at, player_count) VALUES (?, ?)')
+      .run(ts, players);
+    return Number(result.lastInsertRowid);
+  }
+
+  function insertPosition(
+    db: ReturnType<typeof memoryDb>,
+    snapshotId: number,
+    ts: number,
+    userid: string,
+  ): void {
+    db.prepare(
+      `INSERT INTO player_positions (snapshot_id, captured_at, userid, name, level, location_x, location_y)
+       VALUES (?, ?, ?, ?, 1, 10, 20)`,
+    ).run(snapshotId, ts, userid, userid);
+  }
+
+  it('upgrades a version 2 database and recovers what the roster knew', () => {
+    const dbPath = tempDbPath();
+    const legacy = openDatabase(dbPath, logger);
+
+    // A version 2 database: the roster exists, the wayback tables do not yet. Children are dropped
+    // first so the foreign key never has to be violated.
+    legacy.exec('DROP TABLE player_positions');
+    legacy.exec('DROP TABLE player_position_snapshots');
+    legacy.exec('DROP TABLE wayback_settings');
+    legacy.pragma('user_version = 2');
+
+    const observed = new Date('2026-01-02T03:04:05.000Z').toISOString();
+    const insertPlayer = legacy.prepare(
+      `INSERT INTO players
+         (userid, player_id, name, account_name, level, location_x, location_y, first_seen_at, last_online_at)
+       VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+    );
+    insertPlayer.run('USER-A', 'P-1', 'Alice', 'alice', 11, 22, observed, observed);
+    insertPlayer.run('USER-B', 'P-2', 'Bob', 'bob', 33, 44, observed, observed);
+    // Carol's last sighting was a different read, so she gets her own recovered observation.
+    insertPlayer.run('USER-C', 'P-3', 'Carol', 'carol', 55, 66, observed, observed);
+    legacy
+      .prepare('UPDATE players SET last_online_at = ? WHERE userid = ?')
+      .run(new Date('2026-01-02T01:00:00.000Z').toISOString(), 'USER-C');
+    legacy.close();
+
+    const upgraded = openDatabase(dbPath, logger);
+    assert.equal(getSchemaVersion(upgraded), SCHEMA_VERSION);
+
+    const roster = upgraded.prepare('SELECT COUNT(*) AS n FROM players').get() as { n: number };
+    assert.equal(roster.n, 3, 'the roster came through the upgrade untouched');
+
+    const snapshots = upgraded
+      .prepare(
+        'SELECT captured_at, player_count, synthetic FROM player_position_snapshots ORDER BY captured_at',
+      )
+      .all() as { captured_at: number; player_count: number; synthetic: number }[];
+    assert.equal(snapshots.length, 2, 'one recovered observation per distinct sighting instant');
+    assert.equal(snapshots[0]?.player_count, 1, 'Carol was seen on her own');
+    assert.equal(snapshots[1]?.player_count, 2, 'Alice and Bob were seen together');
+    assert.ok(
+      snapshots.every((row) => row.synthetic === 1),
+      'recovered rows are marked so they never appear as timeline ticks',
+    );
+
+    const positions = upgraded
+      .prepare('SELECT userid, captured_at, location_x FROM player_positions ORDER BY userid')
+      .all() as { userid: string; captured_at: number; location_x: number }[];
+    assert.equal(positions.length, 3);
+    assert.deepEqual(
+      positions.map((row) => row.location_x),
+      [11, 33, 55],
+      "each recovered position is the roster row's own last known coordinates",
+    );
+    assert.equal(
+      positions[2]?.captured_at,
+      Math.floor(Date.parse('2026-01-02T01:00:00.000Z') / 1_000),
+      'and its own sighting instant, not the migration time',
+    );
+
+    const settings = upgraded
+      .prepare('SELECT interval_seconds AS seconds FROM wayback_settings WHERE id = 1')
+      .get() as { seconds: number };
+    assert.equal(settings.seconds, 60, 'the recording cadence starts at the documented default');
+
+    runMigrations(upgraded, logger);
+    assert.equal(getSchemaVersion(upgraded), SCHEMA_VERSION, 're-running applies nothing');
+    upgraded.close();
+  });
+
+  it('indexes the lookups history queries depend on', () => {
+    const db = memoryDb();
+    const names = (
+      db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all() as { name: string }[]
+    ).map((row) => row.name);
+
+    assert.ok(names.includes('idx_player_positions_player_time'));
+    assert.ok(
+      names.some((name) => name.startsWith('sqlite_autoindex_player_position_snapshots')),
+      'captured_at is unique, which is what makes it the range index too',
+    );
+    db.close();
+  });
+
+  it('deletes positions along with the snapshot that owns them', () => {
+    const db = memoryDb();
+    const now = Math.floor(Date.now() / 1_000);
+    const snapshotId = insertSnapshot(db, now, 1);
+    insertPosition(db, snapshotId, now, 'USER-A');
+
+    db.prepare('DELETE FROM player_position_snapshots WHERE id = ?').run(snapshotId);
+
+    const left = db.prepare('SELECT COUNT(*) AS n FROM player_positions').get() as { n: number };
+    assert.equal(left.n, 0);
+    db.close();
+  });
+
+  it('refuses a position with no snapshot to belong to', () => {
+    const db = memoryDb();
+    assert.throws(() => insertPosition(db, 9_999, Math.floor(Date.now() / 1_000), 'USER-A'));
+    db.close();
+  });
+
+  describe('prunePlayerHistory', () => {
+    it('removes observations and positions past the retention window', () => {
+      const db = memoryDb();
+      const now = Date.now();
+      const nowSeconds = Math.floor(now / 1_000);
+
+      const fresh = insertSnapshot(db, nowSeconds - 10, 1);
+      insertPosition(db, fresh, nowSeconds - 10, 'USER-A');
+      const boundary = insertSnapshot(db, nowSeconds - 30 * 24 * 60 * 60, 1);
+      insertPosition(db, boundary, nowSeconds - 30 * 24 * 60 * 60, 'USER-B');
+      const stale = insertSnapshot(db, nowSeconds - 31 * 24 * 60 * 60, 1);
+      insertPosition(db, stale, nowSeconds - 31 * 24 * 60 * 60, 'USER-C');
+
+      assert.equal(prunePlayerHistory(db, 30, now), 1, 'only the expired observation went');
+
+      const snapshots = db
+        .prepare('SELECT captured_at FROM player_position_snapshots ORDER BY captured_at')
+        .all() as { captured_at: number }[];
+      assert.equal(snapshots.length, 2, 'the boundary observation is kept');
+
+      const positions = db.prepare('SELECT userid FROM player_positions').all() as {
+        userid: string;
+      }[];
+      assert.deepEqual(
+        positions.map((row) => row.userid),
+        ['USER-A', 'USER-B'],
+        'the expired position was not left behind',
+      );
+      db.close();
+    });
+
+    it('is a no-op when nothing is expired', () => {
+      const db = memoryDb();
+      const snapshotId = insertSnapshot(db, Math.floor(Date.now() / 1_000), 0);
+      assert.ok(snapshotId > 0);
+      assert.equal(prunePlayerHistory(db, 30), 0);
+      db.close();
+    });
   });
 });
 

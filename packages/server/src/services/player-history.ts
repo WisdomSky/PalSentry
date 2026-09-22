@@ -1,0 +1,515 @@
+import {
+  DEFAULT_WAYBACK_INTERVAL_SECONDS,
+  DEFAULT_WAYBACK_WINDOW,
+  WAYBACK_INTERVAL_OPTIONS,
+  isWaybackInterval,
+  type HistorySelection,
+  type HistoryWindow,
+  type PlayerHistoryResponse,
+  type WaybackPlayerHistory,
+  type WaybackPoint,
+  type WaybackSnapshot,
+} from '@palsentry/shared';
+import type { PalworldPlayer } from '@palsentry/shared';
+import type { Db } from '../db/index.js';
+import { prunePlayerHistory } from '../db/migrations.js';
+import type { Logger } from '../logger.js';
+import { resolveHistoryRange } from './history-range.js';
+import type { PlayerService, PlayerSnapshot } from './players.js';
+
+/**
+ * Records where players have been, so the map can be replayed.
+ *
+ * The live map is a snapshot of right now, and the roster only remembers each account's latest
+ * position. Neither can answer "where was everyone at 14:20?", which is what makes a griefing
+ * report or a "did anyone go near that base?" question unanswerable after the fact.
+ *
+ * Three properties this service is built around:
+ *
+ * 1. **The cadence is a setting, not a deployment detail.** It is stored in SQLite and changed
+ *    from the dashboard, because the useful value depends on what the operator is investigating:
+ *    fine-grained while chasing an incident, coarse the rest of the time.
+ * 2. **Only real observations are recorded.** A failed upstream read writes nothing, so the
+ *    timeline keeps an honest gap rather than inventing a straight line across an outage.
+ * 3. **An empty observation is still an observation.** A tick that reports nobody online is
+ *    stored, which is what lets the timeline distinguish "the server was empty" from "PalSentry
+ *    could not reach the server".
+ *
+ * This does not read the game server itself. It drives {@link PlayerService.refresh}, which
+ * already deduplicates concurrent reads and owns the durable roster, so a browser request and a
+ * recording tick never stack two upstream requests.
+ */
+
+/** How often retention pruning runs while the process is up. */
+const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+
+/**
+ * Most players one history response will describe.
+ *
+ * The roster is unbounded by design (accounts are never forgotten), but a map is not: a response
+ * with thousands of players and a point per bucket would be megabytes of JSON nobody can read.
+ * Roster order is most-recently-online-first, so the cap drops exactly the accounts that have not
+ * been seen in the longest time.
+ */
+const MAX_HISTORY_PLAYERS = 250;
+
+export interface PlayerHistoryServiceOptions {
+  db: Db;
+  players: PlayerService;
+  logger: Logger;
+  /** Shared with metric history: positions are pruned on the same schedule. */
+  retentionDays: number;
+}
+
+interface IntervalRow {
+  intervalSeconds: number;
+}
+
+interface PointRow {
+  userid: string;
+  ts: number;
+  x: number;
+  y: number;
+}
+
+interface SnapshotRow {
+  ts: number;
+  playerCount: number;
+}
+
+interface BaselineRow {
+  ts: number;
+  x: number;
+  y: number;
+}
+
+export class PlayerHistoryService {
+  private readonly db: Db;
+  private readonly players: PlayerService;
+  private readonly logger: Logger;
+  private readonly retentionDays: number;
+
+  /** The cadence in force, mirrored in memory so reads never touch SQLite. */
+  private cadenceSeconds: number;
+
+  private sampleTimer: NodeJS.Timeout | null = null;
+  private pruneTimer: NodeJS.Timeout | null = null;
+  /** The observation currently in flight, so `stop()` can wait for its write before the DB closes. */
+  private inflight: Promise<boolean> | null = null;
+
+  constructor(options: PlayerHistoryServiceOptions) {
+    this.db = options.db;
+    this.players = options.players;
+    this.logger = options.logger;
+    this.retentionDays = options.retentionDays;
+    this.cadenceSeconds = this.loadInterval();
+  }
+
+  // -------------------------------------------------------------------------
+  // Recording cadence
+  // -------------------------------------------------------------------------
+
+  /** The cadence recordings are currently taken at, in seconds. */
+  get intervalSeconds(): number {
+    return this.cadenceSeconds;
+  }
+
+  /**
+   * Read the persisted cadence, repairing it if it is missing or not one of the offered values.
+   *
+   * Self-healing rather than tolerant on purpose: a cadence outside the enum cannot be shown as a
+   * selected option in the UI, so leaving it in place would present an interval the operator
+   * cannot see or change back.
+   */
+  private loadInterval(): number {
+    const row = this.db
+      .prepare('SELECT interval_seconds AS intervalSeconds FROM wayback_settings WHERE id = 1')
+      .get() as IntervalRow | undefined;
+
+    if (row !== undefined && isWaybackInterval(row.intervalSeconds)) return row.intervalSeconds;
+
+    const reason =
+      row === undefined
+        ? 'no stored interval'
+        : `stored interval ${row.intervalSeconds}s is not an offered cadence`;
+
+    this.logger.warn(
+      { reason, fallbackSeconds: DEFAULT_WAYBACK_INTERVAL_SECONDS },
+      'Resetting the wayback recording interval to the default',
+    );
+    this.writeInterval(DEFAULT_WAYBACK_INTERVAL_SECONDS, new Date());
+
+    return DEFAULT_WAYBACK_INTERVAL_SECONDS;
+  }
+
+  private writeInterval(seconds: number, updatedAt: Date): void {
+    this.db
+      .prepare(
+        `INSERT INTO wayback_settings (id, interval_seconds, updated_at)
+         VALUES (1, @seconds, @updatedAt)
+         ON CONFLICT(id) DO UPDATE SET
+           interval_seconds = excluded.interval_seconds,
+           updated_at       = excluded.updated_at`,
+      )
+      .run({ seconds, updatedAt: updatedAt.toISOString() });
+  }
+
+  /**
+   * Persist and adopt a new recording cadence.
+   *
+   * The next sample is taken one full interval from now rather than immediately: a change of
+   * cadence is a statement about the future, and firing a read the moment the operator clicks
+   * "save" would make a cadence change look like a data point. Existing history is untouched —
+   * old samples were recorded at the old cadence and are read as such.
+   *
+   * Returns the interval now in force.
+   */
+  setIntervalSeconds(seconds: number, updatedAt: Date = new Date()): number {
+    if (!isWaybackInterval(seconds)) {
+      throw new RangeError(
+        `Recording interval must be one of ${WAYBACK_INTERVAL_OPTIONS.join(', ')} seconds, got ${seconds}.`,
+      );
+    }
+
+    if (seconds === this.cadenceSeconds) return this.cadenceSeconds;
+
+    this.writeInterval(seconds, updatedAt);
+    this.cadenceSeconds = seconds;
+    // A fresh countdown from this moment, so the first gap after a change is the length the
+    // operator just chose rather than the remainder of the old schedule.
+    this.reschedule(seconds);
+
+    this.logger.info({ intervalSeconds: seconds }, 'Wayback recording interval changed');
+    return seconds;
+  }
+
+  /** Restart the sample timer with a fresh countdown. No-op unless the recorder is running. */
+  private reschedule(seconds: number): void {
+    if (this.sampleTimer === null) return;
+
+    clearInterval(this.sampleTimer);
+    this.sampleTimer = setInterval(() => {
+      void this.observe();
+    }, seconds * 1_000);
+    this.sampleTimer.unref();
+  }
+
+  // -------------------------------------------------------------------------
+  // Lifecycle
+  // -------------------------------------------------------------------------
+
+  /**
+   * Begin recording, and resolve once the first observation has been written.
+   *
+   * Like the metrics poller, timers are installed before the first observation is awaited so a
+   * slow game server cannot delay the schedule, and this only runs from the real entrypoint —
+   * tests call `observe()` directly rather than acquiring background timers.
+   */
+  async start(): Promise<void> {
+    if (this.sampleTimer !== null) return;
+
+    this.prune();
+
+    this.sampleTimer = setInterval(() => {
+      void this.observe();
+    }, this.cadenceSeconds * 1_000);
+    this.sampleTimer.unref();
+
+    this.pruneTimer = setInterval(() => this.prune(), PRUNE_INTERVAL_MS);
+    this.pruneTimer.unref();
+
+    this.logger.info(
+      { intervalSeconds: this.cadenceSeconds, retentionDays: this.retentionDays },
+      'Wayback recorder started',
+    );
+
+    await this.observe();
+  }
+
+  /** Stop recording, waiting for any in-flight write so shutdown cannot race it. */
+  async stop(): Promise<void> {
+    if (this.sampleTimer !== null) {
+      clearInterval(this.sampleTimer);
+      this.sampleTimer = null;
+    }
+    if (this.pruneTimer !== null) {
+      clearInterval(this.pruneTimer);
+      this.pruneTimer = null;
+    }
+
+    try {
+      await this.inflight;
+    } catch {
+      // `observe()` does not reject, but never let shutdown hinge on that.
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Writing
+  // -------------------------------------------------------------------------
+
+  /**
+   * Take one observation and store it.
+   *
+   * Never rejects: an unreachable game server is an ordinary event, and a gap in the history is
+   * the correct outcome. Concurrent calls share one observation rather than writing twice.
+   */
+  async observe(): Promise<boolean> {
+    if (this.inflight !== null) return this.inflight;
+
+    const promise = this.takeObservation().finally(() => {
+      this.inflight = null;
+    });
+    this.inflight = promise;
+    return promise;
+  }
+
+  private async takeObservation(): Promise<boolean> {
+    const snapshot = await this.players.refresh();
+
+    if (!snapshot.ok) {
+      // Nothing is written, so the trail breaks here instead of jumping across the outage.
+      // PlayerService already warned about the outage itself; this is the history-specific
+      // consequence and belongs at debug level.
+      this.logger.debug('Wayback observation failed; movement history will have a gap');
+      return false;
+    }
+
+    return this.recordSnapshot(snapshot) !== null;
+  }
+
+  /**
+   * Store one successful observation, atomically.
+   *
+   * Returns the new snapshot id, or null when nothing was written — either because the read
+   * failed or because this exact second is already recorded (which can only happen across a
+   * restart, where the previous process may have sampled in the same second).
+   */
+  recordSnapshot(snapshot: PlayerSnapshot): number | null {
+    if (!snapshot.ok) return null;
+
+    const capturedAt = Math.floor(Date.parse(snapshot.observedAt) / 1_000);
+    if (!Number.isFinite(capturedAt)) {
+      this.logger.warn(
+        { observedAt: snapshot.observedAt },
+        'Wayback observation had no usable time',
+      );
+      return null;
+    }
+
+    const insertSnapshot = this.db.prepare(
+      `INSERT INTO player_position_snapshots (captured_at, player_count)
+       VALUES (@capturedAt, @playerCount)
+       ON CONFLICT(captured_at) DO NOTHING`,
+    );
+    const insertPosition = this.db.prepare(
+      `INSERT INTO player_positions
+         (snapshot_id, captured_at, userid, name, level, location_x, location_y)
+       VALUES
+         (@snapshotId, @capturedAt, @userid, @name, @level, @locationX, @locationY)`,
+    );
+
+    // One transaction for the observation and its positions: a snapshot row without its players
+    // would claim the server was empty, which is a different fact entirely.
+    const write = this.db.transaction(
+      (at: number, players: readonly PalworldPlayer[]): number | null => {
+        const inserted = insertSnapshot.run({ capturedAt: at, playerCount: players.length });
+        if (inserted.changes === 0) return null;
+
+        const snapshotId = Number(inserted.lastInsertRowid);
+        for (const player of players) {
+          insertPosition.run({
+            snapshotId,
+            capturedAt: at,
+            userid: player.userId,
+            name: player.name,
+            level: player.level,
+            locationX: player.location_x,
+            locationY: player.location_y,
+          });
+        }
+        return snapshotId;
+      },
+    );
+
+    return write(capturedAt, snapshot.players);
+  }
+
+  /**
+   * Delete history beyond the retention window.
+   *
+   * `now` is injectable so the retention boundary can be tested at a fixed instant instead of
+   * only against the wall clock.
+   */
+  prune(now: number = Date.now()): number {
+    try {
+      const removed = prunePlayerHistory(this.db, this.retentionDays, now);
+      if (removed > 0) {
+        this.logger.debug(
+          { removed, retentionDays: this.retentionDays },
+          'Pruned old player position history',
+        );
+      }
+      return removed;
+    } catch (error) {
+      this.logger.warn({ err: error }, 'Failed to prune player position history');
+      return 0;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Reading
+  // -------------------------------------------------------------------------
+
+  /**
+   * Recorded movement for a rolling preset or an explicit absolute range.
+   *
+   * Everything a single selected instant needs is in the response, so scrubbing the timeline is a
+   * client-side operation: one request per range, not one per pointer movement.
+   *
+   * The response is downsampled to one observation per bucket, per player:
+   *
+   * - **Ticks** are the last successful snapshot in each bucket, kept at its real timestamp so a
+   *   selected instant always names an observation that actually happened.
+   * - **Points** are each player's last observation in each bucket, also at its real timestamp.
+   *
+   * Because both keep the *last* row of a bucket, a player who appears in a tick's snapshot
+   * necessarily has a point with that exact timestamp. That equality is what the UI uses to
+   * decide whether a player was online at the selected instant, and it stays correct without the
+   * server having to send a per-tick roster.
+   */
+  history(
+    requested: HistorySelection | HistoryWindow = {
+      kind: 'window',
+      window: DEFAULT_WAYBACK_WINDOW,
+    },
+    now: number = Date.now(),
+  ): PlayerHistoryResponse {
+    const { selection, window, from, to, bucketSeconds, anchor } = resolveHistoryRange(requested, {
+      retentionDays: this.retentionDays,
+      sampleIntervalSeconds: this.cadenceSeconds,
+      now,
+    });
+
+    const parameters = { anchor, bucket: bucketSeconds, from, to };
+
+    const snapshotRows = this.db
+      .prepare(
+        `SELECT ts, player_count AS playerCount
+           FROM (
+             SELECT captured_at AS ts,
+                    player_count,
+                    ROW_NUMBER() OVER (
+                      PARTITION BY CAST((captured_at - @anchor) / @bucket AS INTEGER)
+                      ORDER BY captured_at DESC
+                    ) AS rank
+               FROM player_position_snapshots
+              WHERE captured_at >= @from
+                AND captured_at <= @to
+                -- Rows synthesised from the pre-upgrade roster are usable history but were never
+                -- observed by this service, so they must not appear as timeline ticks.
+                AND synthetic = 0
+           )
+          WHERE rank = 1
+          ORDER BY ts`,
+      )
+      .all(parameters) as SnapshotRow[];
+
+    const pointRows = this.db
+      .prepare(
+        `SELECT userid, ts, x, y
+           FROM (
+             SELECT userid,
+                    captured_at AS ts,
+                    location_x  AS x,
+                    location_y  AS y,
+                    ROW_NUMBER() OVER (
+                      PARTITION BY userid, CAST((captured_at - @anchor) / @bucket AS INTEGER)
+                      ORDER BY captured_at DESC
+                    ) AS rank
+               FROM player_positions
+              WHERE captured_at >= @from
+                AND captured_at <= @to
+           )
+          WHERE rank = 1
+          ORDER BY userid, ts`,
+      )
+      .all(parameters) as PointRow[];
+
+    const pointsByUser = new Map<string, WaybackPoint[]>();
+    for (const row of pointRows) {
+      const points = pointsByUser.get(row.userid);
+      const point: WaybackPoint = { ts: row.ts, x: row.x, y: row.y };
+      if (points === undefined) pointsByUser.set(row.userid, [point]);
+      else points.push(point);
+    }
+
+    // Latest point strictly before the range, per player. Indexed per-account lookups rather than
+    // one aggregate scan: the roster is small, while the history below `from` can be huge.
+    const findBaseline = this.db.prepare(
+      `SELECT captured_at AS ts, location_x AS x, location_y AS y
+         FROM player_positions
+        WHERE userid = ?
+          AND captured_at < ?
+        ORDER BY captured_at DESC
+        LIMIT 1`,
+    );
+
+    const players: WaybackPlayerHistory[] = [];
+    const known = new Set<string>();
+    for (const entry of this.players.list()) {
+      if (players.length >= MAX_HISTORY_PLAYERS) break;
+
+      known.add(entry.userId);
+      const points = pointsByUser.get(entry.userId) ?? [];
+      const baselineRow = findBaseline.get(entry.userId, from) as BaselineRow | undefined;
+
+      // A roster account with nothing recorded anywhere would be a marker with no position, so
+      // it is left out entirely; the live Players tab is where accounts are enumerated.
+      if (points.length === 0 && baselineRow === undefined) continue;
+
+      players.push({
+        userId: entry.userId,
+        name: entry.name,
+        baseline:
+          baselineRow === undefined
+            ? null
+            : { ts: baselineRow.ts, x: baselineRow.x, y: baselineRow.y },
+        points,
+      });
+    }
+
+    // Positions are only ever written for accounts the roster already knows, so a recorded
+    // account the roster cannot name is a real inconsistency rather than an expected state.
+    // Saying so beats silently hiding someone's movement from the map.
+    for (const userid of pointsByUser.keys()) {
+      if (!known.has(userid)) {
+        this.logger.warn(
+          { userid },
+          'Recorded wayback positions have no roster entry; that account is missing from the map',
+        );
+      }
+    }
+
+    return {
+      selection,
+      window,
+      from,
+      to,
+      bucketSeconds,
+      snapshots: snapshotRows.map<WaybackSnapshot>((row) => ({
+        ts: row.ts,
+        playerCount: row.playerCount,
+      })),
+      players,
+    };
+  }
+
+  /** Total observations stored, for diagnostics. */
+  count(): number {
+    const row = this.db.prepare('SELECT COUNT(*) AS n FROM player_position_snapshots').get() as {
+      n: number;
+    };
+    return row.n;
+  }
+}

@@ -52,11 +52,27 @@ The live world map displays all of your bases and their locations. It also shows
 
 ![Live World Map](screenshots/3-livemap.png)
 
+
+#### Tracking Mode
 The map also includes a special **Tracking Mode**, allowing you to focus on a specific player and automatically follow their movements in real time.
 
 The map keeps the selected player in view even when they travel long distances or teleport to another location.
 
 ![Player Tracking Mode](screenshots/3.2-livemap-tracking.png)
+
+#### Wayback Mode
+
+PalSentry records where players are as it runs, so the map can be replayed instead of only showing the present. The **Wayback map** button on the Players tab opens the last 24 hours with every player PalSentry has seen — including the ones who logged off hours ago.
+
+- Scrub the datetime strip to preview any recorded moment, then click, tap, or use the arrow keys to hold one. The whole range is loaded once, so moving the pointer never issues a request.
+- Trails are drawn up to the selected moment and break across outages and region changes, so a line on the map only ever shows movement PalSentry actually observed.
+- Players who were not online at the selected moment stay on the map at their last known position, faded and labelled with when they were last seen.
+- Current guild bases can be added as context, marked as current rather than historical.
+- **Cancel Wayback map** returns to the live map with live tracking, bases, and pins exactly as they were.
+
+Recording continues while no dashboard is open, at a cadence chosen from the Players tab (5s, 15s, 30s, 1m, or 5m — 60s by default). The cadence is stored in the database, so it survives restarts, and it is independent of `PALSENTRY_SAMPLE_INTERVAL_SECONDS`. Detail costs storage: the default records about 1,400 positions per player per day, while 5 seconds records about 17,000.
+
+![Wayback Mode](screenshots/3.3-livemap-replay.png)
 
 ### Enhanced Server Tools
 
@@ -72,6 +88,8 @@ Perform common server operations such as:
 
 ![Server Dashboard](screenshots/1-dashboard.png)
 
+Worldmap overview displays both palpagos islands and world tree maps side by side in the dashboard to keep track of all active players.
+![Server Dashboard](screenshots/1.2-dashboard.png)
 ### Player Management
 
 The dashboard provides a quick overview of currently online players, while the dedicated **Players** page gives you access to both online and offline player records.
@@ -96,26 +114,26 @@ By default, server metrics are collected every minute and displayed in clean, ea
 
 ## Environment Variables
 
-| Variable                                   | Default      | Description                                                                      |
-| ------------------------------------------ | ------------ | -------------------------------------------------------------------------------- |
-| `PALWORLD_REST_URL`                        | **Required** | Palworld REST API host and port                                                  |
-| `PALWORLD_ADMIN_PASSWORD`                  | **Required** | Palworld `AdminPassword`                                                         |
-| `PALSENTRY_SESSION_SECRET`                 | ``           | Cookie-signing secret; must be at least 32 characters                            |
-| `PALSENTRY_LOGIN_USERNAME`                 | `admin`      | PalSentry dashboard login username                                               |
-| `PALSENTRY_LOGIN_PASSWORD`                 | `admin`      | Plaintext dashboard password                                                     |
-| `PALSERVER_REST_USERNAME`                  | `admin`      | HTTP Basic Authentication username used by the Palworld REST API                 |
-| `PALSENTRY_LOGIN_PASSWORD_HASH`            |              | Generated scrypt password hash; takes precedence over `PALSENTRY_LOGIN_PASSWORD` |
-| `PALSENTRY_SESSION_TTL_HOURS`              | `12`         | Dashboard session lifetime in hours                                              |
-| `PALSERVER_TIMEOUT_MS`                     | `10000`      | Palworld REST API request timeout in milliseconds                                |
-| `PALSENTRY_ALLOW_DESTRUCTIVE`              | `true`       | Enables kick, ban, unban, shutdown, stop, and restart operations                 |
-| `PALSENTRY_TRUST_PROXY`                    | `false`      | Trust proxy IP headers and use Secure cookies                                    |
-| `PALSENTRY_SAMPLE_INTERVAL_SECONDS`        | `60`         | Metrics and player-roster sampling interval (`5`–`3600`)                         |
-| `PALSENTRY_HISTORY_RETENTION_DAYS`         | `30`         | Number of days historical metrics are retained (`1`–`3650`)                      |
-| `PALSENTRY_RESTART_WAIT_SECONDS`           | `30`         | Default player-warning countdown before a restart                                |
-| `PALSENTRY_RESTART_HEALTH_TIMEOUT_SECONDS` | `180`        | Maximum time to wait for the server to become healthy after a restart            |
-| `PALSENTRY_RESTART_POLL_INTERVAL_MS`       | `2000`       | Health-check interval while waiting for the server to return                     |
-| `PALSENTRY_MAP_PROJECTION`                 | `new`        | Map projection mode: `none`, `new` for Palworld 1.0+, or `legacy`                |
-| `LOG_LEVEL`                                | `info`       | Logging level: `fatal`, `error`, `warn`, `info`, `debug`, `trace`, or `silent`   |
+| Variable                                   | Default      | Description                                                                              |
+| ------------------------------------------ | ------------ | ---------------------------------------------------------------------------------------- |
+| `PALWORLD_REST_URL`                        | **Required** | Palworld REST API host and port                                                          |
+| `PALWORLD_ADMIN_PASSWORD`                  | **Required** | Palworld `AdminPassword`                                                                 |
+| `PALSENTRY_SESSION_SECRET`                 | ``           | Cookie-signing secret; must be at least 32 characters                                    |
+| `PALSENTRY_LOGIN_USERNAME`                 | `admin`      | PalSentry dashboard login username                                                       |
+| `PALSENTRY_LOGIN_PASSWORD`                 | `admin`      | Plaintext dashboard password                                                             |
+| `PALSERVER_REST_USERNAME`                  | `admin`      | HTTP Basic Authentication username used by the Palworld REST API                         |
+| `PALSENTRY_LOGIN_PASSWORD_HASH`            |              | Generated scrypt password hash; takes precedence over `PALSENTRY_LOGIN_PASSWORD`         |
+| `PALSENTRY_SESSION_TTL_HOURS`              | `12`         | Dashboard session lifetime in hours                                                      |
+| `PALSERVER_TIMEOUT_MS`                     | `10000`      | Palworld REST API request timeout in milliseconds                                        |
+| `PALSENTRY_ALLOW_DESTRUCTIVE`              | `true`       | Enables kick, ban, unban, shutdown, stop, and restart operations                         |
+| `PALSENTRY_TRUST_PROXY`                    | `false`      | Trust proxy IP headers and use Secure cookies                                            |
+| `PALSENTRY_SAMPLE_INTERVAL_SECONDS`        | `60`         | Metrics sampling interval (`5`–`3600`); position recording has its own dashboard setting |
+| `PALSENTRY_HISTORY_RETENTION_DAYS`         | `30`         | Days of metric and player-movement history retained (`1`–`3650`)                         |
+| `PALSENTRY_RESTART_WAIT_SECONDS`           | `30`         | Default player-warning countdown before a restart                                        |
+| `PALSENTRY_RESTART_HEALTH_TIMEOUT_SECONDS` | `180`        | Maximum time to wait for the server to become healthy after a restart                    |
+| `PALSENTRY_RESTART_POLL_INTERVAL_MS`       | `2000`       | Health-check interval while waiting for the server to return                             |
+| `PALSENTRY_MAP_PROJECTION`                 | `new`        | Map projection mode: `none`, `new` for Palworld 1.0+, or `legacy`                        |
+| `LOG_LEVEL`                                | `info`       | Logging level: `fatal`, `error`, `warn`, `info`, `debug`, `trace`, or `silent`           |
 
 Without overrides, the dashboard login is `admin` / `admin`, the session secret uses the documented shared default, and destructive actions are enabled. These defaults are convenient on a trusted local network; before exposing PalSentry, add safer overrides under `environment`.
 

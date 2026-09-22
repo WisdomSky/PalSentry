@@ -26,6 +26,7 @@ const props = withDefaults(
     showLastOnline?: boolean;
     showBuildingCount?: boolean;
     showBanAction?: boolean;
+    showKickAction?: boolean;
   }>(),
   {
     busyUserid: null,
@@ -34,6 +35,7 @@ const props = withDefaults(
     showLastOnline: false,
     showBuildingCount: true,
     showBanAction: true,
+    showKickAction: true
   },
 );
 
@@ -331,7 +333,7 @@ if (props.showBuildingCount) {
                 <!--                </button>-->
 
                 <button
-                  v-if="player.online"
+                  v-if="showKickAction && player.online"
                   type="button"
                   class="btn-secondary btn-xs mr-2"
                   :disabled="!destructiveAllowed || busyUserid === player.userId"

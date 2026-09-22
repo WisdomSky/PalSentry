@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { Activity, Building2, Clock, Gauge, Server, Users } from '@lucide/vue';
-import type { EnrichedPlayer } from '@palsentry/shared';
+import { Activity, Building2, Clock, Gauge, Map as MapIcon, Server, Users } from '@lucide/vue';
+import { MAP_LAYERS, type EnrichedPlayer } from '@palsentry/shared';
 import { formatUptime, fpsTone, playerLoadPercent } from '@/lib/format';
+import { resolveMapMeta } from '@/lib/map-display';
 import { useServerStore } from '@/stores/server';
 import ActionPanel from '@/components/ActionPanel.vue';
 import EmptyState from '@/components/EmptyState.vue';
+import LiveMinimap from '@/components/LiveMinimap.vue';
 import OfflineBanner from '@/components/OfflineBanner.vue';
 import PlayerActions from '@/components/PlayerActions.vue';
 import PlayerTable from '@/components/PlayerTable.vue';
@@ -16,6 +18,8 @@ const server = useServerStore();
 const router = useRouter();
 
 const metrics = computed(() => server.status?.metrics ?? null);
+/** Shared with the full map, so a preview and the real thing agree on textures and projection. */
+const mapMeta = computed(() => resolveMapMeta(server.meta?.map));
 
 /**
  * Only a few rows here; the Players view has the full sortable table.
@@ -144,6 +148,7 @@ const worldGuidShort = computed(() => server.status?.info?.worldguid.slice(0, 8)
             :show-search="false"
             :show-building-count="false"
             :show-ban-action="false"
+            :show-kick-action="false"
             show-map-action
             @kick="openAction('kick', $event)"
             @ban="openAction('ban', $event)"
@@ -165,6 +170,39 @@ const worldGuidShort = computed(() => server.status?.info?.worldguid.slice(0, 8)
 
       <ActionPanel class="min-w-0" />
     </div>
+
+    <section class="card">
+      <div class="card-header">
+        <h2 class="card-title">Live maps</h2>
+        <p class="text-xs text-slate-500 dark:text-slate-400">
+          <MapIcon class="mr-1 inline h-3 w-3" aria-hidden="true" />
+          Open
+          <RouterLink
+            :to="{ name: 'map' }"
+            class="text-teal-700 hover:underline dark:text-teal-400"
+          >
+            world map
+          </RouterLink>
+          to zoom, follow a player, or replay history.
+        </p>
+      </div>
+
+      <!--
+        Both regions are shown at once, at the same size, because "is anyone in the World Tree?"
+        is the question a single-region tab cannot answer without a click. The previews are static
+        pictures: no camera, no controls, and no guild bases, which are a map-view concern.
+      -->
+      <div class="grid gap-4 p-4 sm:grid-cols-2">
+        <LiveMinimap
+          v-for="layer in MAP_LAYERS"
+          :key="layer.id"
+          :layer="layer.id"
+          :players="server.onlinePlayers"
+          :map="mapMeta"
+          :online="server.online"
+        />
+      </div>
+    </section>
 
     <PlayerActions ref="actions" />
   </div>

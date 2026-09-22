@@ -155,8 +155,6 @@ export interface PlayerServiceOptions {
   db: Db;
   client: PalworldClient;
   logger: Logger;
-  /** How often to look for players while nobody has the dashboard open, in seconds. */
-  intervalSeconds: number;
 }
 
 /**
@@ -176,19 +174,22 @@ export interface PlayerSnapshot {
 }
 
 /**
- * Keeps the roster current.
+ * Keeps the roster current, and is the single reader of the live player list.
  *
- * Owns the two things the table cannot know by itself: when to look, and what a failed look
- * means. A browser request and the background tick share one in-flight read, so the roster is
- * never written twice from two slightly different snapshots.
+ * Owns the two things the table cannot know by itself: what a failed look means, and that a
+ * browser request and a recording tick share one in-flight read, so the roster is never written
+ * twice from two slightly different snapshots.
+ *
+ * It deliberately owns no timer. Scheduling belongs to whoever needs the data at an interval:
+ * today that is `PlayerHistoryService`, which reschedules when the operator changes the recording
+ * cadence and records what each of its observations saw. Adding a timer here as well would mean
+ * two readers sampling the same endpoint on two independent schedules.
  */
 export class PlayerService {
   private readonly roster: PlayerRoster;
   private readonly client: PalworldClient;
   private readonly logger: Logger;
-  private readonly intervalSeconds: number;
 
-  private timer: NodeJS.Timeout | null = null;
   private consecutiveFailures = 0;
   /** The read currently in flight, so callers share one upstream request instead of stacking. */
   private inflight: Promise<PlayerSnapshot> | null = null;
@@ -197,7 +198,6 @@ export class PlayerService {
     this.roster = new PlayerRoster(options.db);
     this.client = options.client;
     this.logger = options.logger;
-    this.intervalSeconds = options.intervalSeconds;
   }
 
   /** Persist a successful snapshot. See {@link PlayerRoster.record}. */
@@ -278,33 +278,13 @@ export class PlayerService {
   }
 
   /**
-   * Begin observing the roster in the background, and resolve once the first read has finished.
+   * Release nothing, but wait for any in-flight read so shutdown cannot race a roster write.
    *
-   * The timer is installed before that first read is awaited, so a slow game server cannot delay
-   * the schedule. Like the metrics poller this only runs from the real entrypoint — tests call
-   * `refresh()` directly rather than acquiring a background timer.
+   * The wait matters because the recording timer may be mid-observation when the process is asked
+   * to stop, and closing SQLite underneath that write would throw from a callback with nothing
+   * left to catch it.
    */
-  async start(): Promise<void> {
-    if (this.timer !== null) return;
-
-    this.timer = setInterval(() => {
-      void this.refresh();
-    }, this.intervalSeconds * 1_000);
-    // Do not hold the event loop open on this account alone.
-    this.timer.unref();
-
-    this.logger.info({ intervalSeconds: this.intervalSeconds }, 'Player roster observer started');
-
-    await this.refresh();
-  }
-
-  /** Stop observing, waiting for any in-flight read so shutdown cannot race a roster write. */
   async stop(): Promise<void> {
-    if (this.timer !== null) {
-      clearInterval(this.timer);
-      this.timer = null;
-    }
-
     try {
       await this.inflight;
     } catch {

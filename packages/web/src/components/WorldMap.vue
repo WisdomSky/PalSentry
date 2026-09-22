@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
   Crosshair,
+  History,
   House,
   ImageOff,
   MapPin,
@@ -18,18 +19,24 @@ import {
   gridLines,
   mapLayerById,
   mapLayerForPoint,
-  mapSpaceToTexture,
   projectToMapLayer,
-  worldToMapSpace,
   type OnlineEnrichedPlayer,
-  type MapCalibration,
   type MapLayerId,
   type MapMeta,
   type MapPoint,
   type PalworldGuildBase,
 } from '@palsentry/shared';
 import { useMapViewport } from '@/composables/useMapViewport';
-import { pingTone } from '@/lib/format';
+import {
+  CALIBRATION_STORAGE_KEY,
+  projectWorldToLayer,
+  readCalibrations,
+  textureModeFor as layerTextureModeFor,
+  type CalibrationByLayer,
+  type ProjectionContext,
+} from '@/lib/map-display';
+import { formatChartTimestamp, pingTone } from '@/lib/format';
+import type { WaybackPlayerScene } from '@/lib/wayback';
 
 const props = withDefaults(
   defineProps<{
@@ -41,57 +48,24 @@ const props = withDefaults(
     map: MapMeta;
     /** When set, the camera follows this account and follows it across regions. */
     trackedUserId?: string | null;
+    /**
+     * Recorded players as of one instant, or null on the live map.
+     *
+     * Supplied instead of `players` rather than alongside it: the two describe different moments,
+     * and showing both on one map would invite reading a live pin as history.
+     */
+    wayback?: { players: WaybackPlayerScene[]; at: number } | null;
   }>(),
   {
     bases: () => [],
     basesAvailable: false,
     trackedUserId: null,
+    wayback: null,
   },
 );
 
 /** Follow zoom as a multiple of the fitted scale, when tracking starts or the target teleports. */
 const TRACK_MIN_ZOOM_RATIO = 2.5;
-
-const LEGACY_CALIBRATION_KEY = 'palsentry:mapCalibration';
-const CALIBRATION_KEY = 'palsentry:mapCalibration:v2';
-type CalibrationByLayer = Record<MapLayerId, MapCalibration>;
-
-function normaliseCalibration(value: unknown): MapCalibration {
-  const parsed = (
-    typeof value === 'object' && value !== null ? value : {}
-  ) as Partial<MapCalibration>;
-  const scale = Number(parsed.scale);
-  return {
-    offsetX: Number(parsed.offsetX) || 0,
-    offsetY: Number(parsed.offsetY) || 0,
-    scale: Number.isFinite(scale) && scale > 0 ? scale : 1,
-  };
-}
-
-function readCalibrations(): CalibrationByLayer {
-  const defaults: CalibrationByLayer = {
-    palpagos: { ...IDENTITY_CALIBRATION },
-    worldTree: { ...IDENTITY_CALIBRATION },
-  };
-
-  try {
-    const stored = localStorage.getItem(CALIBRATION_KEY);
-    if (stored !== null) {
-      const parsed = JSON.parse(stored) as Partial<Record<MapLayerId, unknown>>;
-      return {
-        palpagos: normaliseCalibration(parsed.palpagos),
-        worldTree: normaliseCalibration(parsed.worldTree),
-      };
-    }
-
-    const legacy = localStorage.getItem(LEGACY_CALIBRATION_KEY);
-    if (legacy !== null) defaults.palpagos = normaliseCalibration(JSON.parse(legacy));
-  } catch {
-    // A corrupt browser value should never stop the map from rendering.
-  }
-
-  return defaults;
-}
 
 const activeLayer = ref<MapLayerId>('palpagos');
 const calibrations = ref<CalibrationByLayer>(readCalibrations());
@@ -108,9 +82,13 @@ const visibleBaseTooltipId = computed(
   () => focusedBaseId.value ?? hoveredBaseId.value ?? selectedBaseId.value,
 );
 
-watch(calibrations, (value) => localStorage.setItem(CALIBRATION_KEY, JSON.stringify(value)), {
-  deep: true,
-});
+watch(
+  calibrations,
+  (value) => localStorage.setItem(CALIBRATION_STORAGE_KEY, JSON.stringify(value)),
+  {
+    deep: true,
+  },
+);
 
 function resetCalibration(): void {
   calibrations.value[activeLayer.value] = { ...IDENTITY_CALIBRATION };
@@ -237,22 +215,20 @@ function onTextureLoad(): void {
   failedTextureUrl.value[activeLayer.value] = null;
 }
 
-function applyCalibrationOnLayer(layer: MapLayerId, point: MapPoint): MapPoint {
-  const value = calibrations.value[layer];
-  return {
-    x: (point.x * value.scale + value.offsetX / 100) * MAP_SCENE_SIZE,
-    y: (point.y * value.scale + value.offsetY / 100) * MAP_SCENE_SIZE,
-  };
+function textureModeFor(layer: MapLayerId): boolean {
+  return layerTextureModeFor(layer, props.map, failedTextureUrl.value);
 }
 
-function textureModeFor(layer: MapLayerId): boolean {
-  const url = props.map.layers[layer].textureUrl;
-  return (
-    props.map.projection !== 'none' &&
-    url !== null &&
-    url !== '' &&
-    failedTextureUrl.value[layer] !== url
-  );
+/** Texture availability per layer, for the shared projection helper. */
+function projectionContext(): ProjectionContext {
+  return {
+    map: props.map,
+    calibrations: calibrations.value,
+    textureMode: {
+      palpagos: textureModeFor('palpagos'),
+      worldTree: textureModeFor('worldTree'),
+    },
+  };
 }
 
 /**
@@ -260,28 +236,15 @@ function textureModeFor(layer: MapLayerId): boolean {
  *
  * Tracking needs this: while following a player the active tab lags one update behind a teleport,
  * so `projectLocation` (which only answers for the active tab) would report `null` exactly when
- * the cross-region switch has to be detected.
+ * the cross-region switch has to be detected. The maths itself is shared with the dashboard's live
+ * previews, which project the same coordinates without any camera.
  */
 function projectLocationOnLayer(
   layer: MapLayerId,
   worldX: number,
   worldY: number,
 ): MapPoint | null {
-  if (mapLayerForPoint({ x: worldX, y: worldY }) !== layer) return null;
-
-  // Keep the established new/legacy affine path for custom Palpagos textures.
-  if (layer === 'palpagos' && textureModeFor(layer)) {
-    const mapPoint = worldToMapSpace(worldX, worldY, props.map.projection);
-    if (mapPoint === null) return null;
-    const percent = mapSpaceToTexture(mapPoint, calibrations.value[layer], 100, 100);
-    return {
-      x: (percent.x / 100) * MAP_SCENE_SIZE,
-      y: (percent.y / 100) * MAP_SCENE_SIZE,
-    };
-  }
-
-  const normalized = projectToMapLayer({ x: worldX, y: worldY }, layer);
-  return normalized === null ? null : applyCalibrationOnLayer(layer, normalized);
+  return projectWorldToLayer(layer, worldX, worldY, projectionContext());
 }
 
 function projectLocation(worldX: number, worldY: number): MapPoint | null {
@@ -312,6 +275,82 @@ const basePins = computed<BasePin[]>(() =>
   }),
 );
 
+/** True while a recorded instant is being shown instead of the live world. */
+const waybackActive = computed(() => props.wayback !== null);
+
+interface TrailShape {
+  key: string;
+  colour: string;
+  name: string;
+  points: string;
+}
+
+/**
+ * Trail polylines for the open region.
+ *
+ * Segments are built per region, so filtering by layer here is exact rather than a consequence of
+ * which points happen to project. Projection can still drop an individual point (a custom texture
+ * or calibration change), and a leftover single point is not a path, so those are skipped too.
+ */
+const trailShapes = computed<TrailShape[]>(() => {
+  const scene = props.wayback;
+  if (scene === null) return [];
+
+  return scene.players.flatMap((player) =>
+    player.trail.flatMap((segment, index) => {
+      if (segment.layer !== activeLayer.value) return [];
+
+      const points = segment.points.flatMap((point) => {
+        const projected = projectLocation(point.x, point.y);
+        return projected === null ? [] : [`${projected.x},${projected.y}`];
+      });
+      if (points.length < 2) return [];
+
+      return [
+        {
+          key: `${player.userId}-${index}`,
+          colour: player.colour,
+          name: player.name,
+          points: points.join(' '),
+        },
+      ];
+    }),
+  );
+});
+
+interface WaybackPin {
+  player: WaybackPlayerScene;
+  position: MapPoint;
+}
+
+const waybackPins = computed<WaybackPin[]>(() => {
+  const scene = props.wayback;
+  if (scene === null) return [];
+
+  return scene.players.flatMap((player) => {
+    if (player.position === null) return [];
+    const position = projectLocation(player.position.x, player.position.y);
+    return position === null ? [] : [{ player, position }];
+  });
+});
+
+const waybackPinCounts = computed(() => ({
+  online: waybackPins.value.filter((pin) => pin.player.online).length,
+  offline: waybackPins.value.filter((pin) => !pin.player.online).length,
+}));
+
+/** What a wayback marker says when hovered. */
+function waybackTooltip(player: WaybackPlayerScene): string {
+  const where =
+    player.position === null
+      ? ''
+      : ` · ${formatWorldCoordinate(player.position.x)}, ${formatWorldCoordinate(player.position.y)}`;
+
+  if (player.lastSeenTs === null) return 'No recorded position';
+  if (player.online) return `Online at this time${where}`;
+  return `Offline · last seen ${formatChartTimestamp(player.lastSeenTs)}${where}`;
+}
+
 interface LayerCounts {
   players: number;
   bases: number;
@@ -322,9 +361,17 @@ const layerCounts = computed<Record<MapLayerId, LayerCounts>>(() => {
     palpagos: { players: 0, bases: 0 },
     worldTree: { players: 0, bases: 0 },
   };
-  for (const player of props.players) {
-    const layer = mapLayerForPoint({ x: player.location_x, y: player.location_y });
+  // Recorded players are counted where they were *then*, which may not be where they are now.
+  for (const player of props.wayback?.players ?? []) {
+    if (player.position === null) continue;
+    const layer = mapLayerForPoint(player.position);
     if (layer !== null) counts[layer].players += 1;
+  }
+  if (props.wayback === null) {
+    for (const player of props.players) {
+      const layer = mapLayerForPoint({ x: player.location_x, y: player.location_y });
+      if (layer !== null) counts[layer].players += 1;
+    }
   }
   for (const base of props.bases) {
     const layer = mapLayerForPoint({ x: base.location_x, y: base.location_y });
@@ -447,7 +494,9 @@ function scenePosition(normalized: number): number {
   return normalized * MAP_SCENE_SIZE;
 }
 
-const plottedCount = computed(() => playerPins.value.length + basePins.value.length);
+const plottedCount = computed(
+  () => playerPins.value.length + basePins.value.length + waybackPins.value.length,
+);
 const textureVariable = computed(() =>
   activeLayer.value === 'palpagos'
     ? 'PALSENTRY_MAP_TEXTURE_URL'
@@ -499,14 +548,30 @@ const textureVariable = computed(() =>
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div class="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
           <MapPin class="h-3.5 w-3.5" aria-hidden="true" />
-          <span>
+          <span v-if="waybackActive">
+            {{ waybackPinCounts.online }} online · {{ waybackPinCounts.offline }} offline at this
+            time · {{ basePins.length }} {{ basePins.length === 1 ? 'base' : 'bases' }} on
+            {{ activeDefinition.label }}
+          </span>
+          <span v-else>
             {{ playerPins.length }} {{ playerPins.length === 1 ? 'player' : 'players' }} ·
             {{ basePins.length }} {{ basePins.length === 1 ? 'base' : 'bases' }} on
             {{ activeDefinition.label }}
           </span>
-          <span v-if="!online" class="text-rose-600 dark:text-rose-400">· server offline</span>
-          <span v-else-if="!basesAvailable" class="text-amber-600 dark:text-amber-400">
+          <span v-if="!waybackActive && !online" class="text-rose-600 dark:text-rose-400">
+            · server offline
+          </span>
+          <span
+            v-else-if="!waybackActive && !basesAvailable"
+            class="text-amber-600 dark:text-amber-400"
+          >
             · base layer unavailable
+          </span>
+          <span
+            v-else-if="waybackActive && basePins.length > 0"
+            class="text-slate-400 dark:text-slate-500"
+          >
+            · bases are current, not historical
           </span>
         </div>
 
@@ -662,6 +727,60 @@ const textureVariable = computed(() =>
             </div>
           </template>
 
+          <!--
+            Trails sit above the texture and the grid but below every marker: a path is context,
+            while the pins are the answer to "where was everyone?".
+          -->
+          <svg
+            v-if="trailShapes.length > 0"
+            class="pointer-events-none absolute inset-0 h-full w-full"
+            :viewBox="`0 0 ${MAP_SCENE_SIZE} ${MAP_SCENE_SIZE}`"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            <polyline
+              v-for="shape in trailShapes"
+              :key="shape.key"
+              :points="shape.points"
+              fill="none"
+              :stroke="shape.colour"
+              stroke-width="2"
+              stroke-linejoin="round"
+              stroke-linecap="round"
+              opacity="0.85"
+              vector-effect="non-scaling-stroke"
+            >
+              <title>{{ shape.name }}</title>
+            </polyline>
+          </svg>
+
+          <!-- Recorded players, at their latest known position as of the shown instant. -->
+          <div
+            v-for="pin in waybackPins"
+            :key="pin.player.userId"
+            class="group absolute z-10"
+            :style="markerStyle(pin.position)"
+          >
+            <span
+              class="block h-3 w-3 rounded-full border-2 shadow-md transition-transform group-hover:scale-125 dark:border-slate-900"
+              :class="pin.player.online ? 'border-white' : 'border-dashed opacity-60'"
+              :style="{ backgroundColor: pin.player.colour }"
+            />
+            <span
+              class="pointer-events-none absolute top-4 left-1/2 -translate-x-1/2 rounded px-1.5 py-0.5 text-[10px] whitespace-nowrap text-white"
+              :class="pin.player.online ? '' : 'opacity-70'"
+              :style="{ backgroundColor: pin.player.colour }"
+            >
+              {{ pin.player.name }}
+              <template v-if="!pin.player.online">· offline</template>
+            </span>
+            <span
+              class="pointer-events-none absolute top-9 left-1/2 hidden -translate-x-1/2 rounded bg-slate-900/95 px-2 py-1 text-[10px] whitespace-nowrap text-white shadow-lg group-hover:block"
+            >
+              {{ waybackTooltip(pin.player) }}
+            </span>
+          </div>
+
           <div
             v-for="pin in playerPins"
             :key="pin.player.userId"
@@ -740,17 +859,16 @@ const textureVariable = computed(() =>
           class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 text-center"
         >
           <component
-            :is="online ? Crosshair : ImageOff"
+            :is="waybackActive ? History : online ? Crosshair : ImageOff"
             class="h-6 w-6 text-slate-300 dark:text-slate-700"
             aria-hidden="true"
           />
-          <p class="text-xs text-slate-500 dark:text-slate-400">
-            {{
-              online
-                ? '' /*`No live markers on ${activeDefinition.label}.`*/
-                : 'Server offline — no positions available.'
-            }}
-          </p>
+<!--          <p class="text-xs text-slate-500 dark:text-slate-400">-->
+<!--            <template v-if="waybackActive">-->
+<!--              Nobody recorded on {{ activeDefinition.label }} at this time.-->
+<!--            </template>-->
+<!--            <template v-else-if="!online">Server offline — no positions available.</template>-->
+<!--          </p>-->
         </div>
 
         <div
