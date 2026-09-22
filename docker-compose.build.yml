@@ -1,0 +1,10 @@
+# Build the production image from this checkout instead of pulling it from GHCR:
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+services:
+  palsentry:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: palsentry:local
+    pull_policy: build

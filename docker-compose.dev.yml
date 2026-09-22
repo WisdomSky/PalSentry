@@ -1,0 +1,27 @@
+# Development with hot reload:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+# Open http://localhost:5173. Vite proxies /api to the Node server in the same container.
+# Source-only edits reload immediately; rebuild after changing dependencies or TS configuration.
+services:
+  palsentry:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: build
+    image: palsentry:dev
+    pull_policy: build
+    read_only: false
+    command: npm run dev
+    environment:
+      NODE_ENV: development
+      VITE_DEV_HOST: 0.0.0.0
+    ports:
+      - '${PALSENTRY_BIND_ADDRESS:-127.0.0.1}:5173:5173'
+    volumes:
+      # Configuration is inherited from the base service's environment mapping. Mount only source
+      # files, NEVER an .env file or the host's node_modules/native SQLite binary.
+      - ./packages/server/src:/app/packages/server/src:ro
+      - ./packages/shared/src:/app/packages/shared/src:ro
+      - ./packages/web/src:/app/packages/web/src:ro
+      - ./packages/web/index.html:/app/packages/web/index.html:ro
+      - ./packages/web/vite.config.ts:/app/packages/web/vite.config.ts:ro

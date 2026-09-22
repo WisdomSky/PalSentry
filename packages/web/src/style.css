@@ -1,0 +1,127 @@
+@import 'tailwindcss';
+
+/*
+ * Class-based dark mode.
+ *
+ * Tailwind v4 defaults `dark:` to `prefers-color-scheme`; this variant makes it follow a `.dark`
+ * class on <html> instead, so the in-app theme toggle can override the OS setting.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Inter var', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, monospace;
+}
+
+@layer base {
+  html {
+    @apply antialiased;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100;
+  }
+
+  /* Keep focus rings visible — this app has destructive buttons and keyboard users matter. */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-teal-500;
+  }
+
+  /* Thin scrollbars so dense tables do not waste horizontal space. */
+  * {
+    scrollbar-width: thin;
+  }
+}
+
+@layer components {
+  /*
+   * Button base.
+   *
+   * Note the shared selector list rather than `@apply btn`: Tailwind v4 cannot `@apply` a class
+   * defined in the components layer, only real utilities. Listing the variants here gives every
+   * button the base styling while keeping each variant's colours separate.
+   */
+  .btn,
+  .btn-primary,
+  .btn-secondary,
+  .btn-danger,
+  .btn-ghost {
+    @apply relative inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium
+      transition-colors select-none
+      disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply bg-teal-600 text-white hover:bg-teal-500;
+  }
+
+  .btn-secondary {
+    @apply border border-slate-300 bg-white text-slate-700 hover:bg-slate-100
+      dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700;
+  }
+
+  .btn-danger {
+    @apply bg-rose-600 text-white hover:bg-rose-500;
+  }
+
+  .btn-ghost {
+    @apply text-slate-500 hover:bg-slate-100 hover:text-slate-900
+      dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100;
+  }
+
+  /*
+   * Size modifier, declared last. `.btn-xs` deliberately appears with a variant in markup
+   * (`class="btn-primary btn-xs"`), and both rules have equal specificity — so source order is
+   * what lets the smaller padding win.
+   */
+  .btn-xs {
+    @apply gap-1.5 rounded-md px-2 py-1 text-xs;
+  }
+
+  .card {
+    @apply rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900;
+  }
+
+  .card-header {
+    @apply flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-800;
+  }
+
+  .card-title {
+    @apply text-sm font-semibold tracking-wide text-slate-700 uppercase dark:text-slate-300;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900
+      placeholder:text-slate-400
+      focus:border-teal-500 focus:ring-1 focus:ring-teal-500 focus:outline-none
+      dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500;
+  }
+
+  .label {
+    @apply mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
+  }
+
+  .cell {
+    @apply px-3 py-2 text-sm whitespace-nowrap;
+  }
+
+  .table-head {
+    @apply px-3 py-2 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase
+      dark:text-slate-400;
+  }
+}
+
+/* Respect users who have asked for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

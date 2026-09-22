@@ -1,0 +1,31 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Runtime state / local database
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Local map textures (copyrighted game art — never commit)
+public/map/
+map/
+plans/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Logs
+*.log
+npm-debug.log*

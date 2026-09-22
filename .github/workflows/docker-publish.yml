@@ -1,0 +1,208 @@
+name: Build and publish container
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+env:
+  DOCKERHUB_IMAGE: wisdomsky/palsentry
+  GHCR_IMAGE: ghcr.io/wisdomsky/palsentry
+
+jobs:
+  quality:
+    name: Quality checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check formatting
+        run: npm run lint
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Build application
+        run: npm run build
+
+      - name: Run smoke tests
+        run: npm run test:smoke
+
+      - name: Validate environment-only Compose configuration
+        env:
+          PALSERVER_API_URL: http://palworld.internal:8212
+          PALSERVER_ADMIN_PASSWORD: compose-check-palworld-password
+          PALSENTRY_AUTH_PASSWORD: compose-check-dashboard-password
+          PALSENTRY_SESSION_SECRET: compose-check-session-secret-at-least-32-characters
+        run: |
+          test ! -e .env
+          docker compose config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.build.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.dev.yml config --quiet
+
+          # The optional template must be inert until its required blanks are filled.
+          docker compose --env-file .env.example config --quiet
+          if env -u PALSERVER_API_URL -u PALSERVER_ADMIN_PASSWORD -u PALSENTRY_SESSION_SECRET \
+            -u PALSENTRY_AUTH_PASSWORD docker compose --env-file .env.example config --quiet 2>/dev/null; then
+            echo "A blank .env.example must not produce a runnable configuration." >&2
+            exit 1
+          fi
+
+          docker compose config --format json > /tmp/palsentry-compose.json
+          node --input-type=commonjs <<'NODE'
+          const model = require('/tmp/palsentry-compose.json');
+          const service = model.services.palsentry;
+          const environment = service.environment;
+
+          if (service.image !== 'ghcr.io/wisdomsky/palsentry:latest') {
+            throw new Error(`Unexpected default image: ${service.image}`);
+          }
+          if (service.build !== undefined) {
+            throw new Error('The default production service must pull rather than build.');
+          }
+          if (environment.PALSERVER_API_URL !== process.env.PALSERVER_API_URL) {
+            throw new Error('Shell-provided environment was not passed to the service.');
+          }
+          if (
+            environment.PALSENTRY_HOST !== '0.0.0.0' ||
+            environment.PALSENTRY_PORT !== '3000' ||
+            environment.PALSENTRY_DATA_DIR !== '/data'
+          ) {
+            throw new Error('Container host, port, and data directory must remain pinned.');
+          }
+          if ('PALSENTRY_DB_PATH' in environment || 'PALSENTRY_WEB_DIST' in environment) {
+            throw new Error('Local-only path overrides must not be exposed in production Compose.');
+          }
+          NODE
+
+  image-check:
+    name: Build pull-request image
+    if: github.event_name == 'pull_request'
+    needs: quality
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build image without publishing
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          provenance: false
+          sbom: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  publish:
+    name: Publish multi-platform image
+    if: github.event_name != 'pull_request'
+    needs: quality
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+          DOCKER_METADATA_SHORT_SHA_LENGTH: 12
+        with:
+          images: |
+            ${{ env.DOCKERHUB_IMAGE }}
+            ${{ env.GHCR_IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=sha-
+          labels: |
+            org.opencontainers.image.title=PalSentry
+            org.opencontainers.image.description=Self-hosted dashboard for a Palworld dedicated server
+            org.opencontainers.image.licenses=AGPL-3.0-only
+          annotations: |
+            org.opencontainers.image.title=PalSentry
+            org.opencontainers.image.description=Self-hosted dashboard for a Palworld dedicated server
+            org.opencontainers.image.licenses=AGPL-3.0-only
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+      - name: Build and publish to both registries
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+
+      - name: Summarize published image
+        run: |
+          {
+            echo '### Published container image'
+            echo '- Docker Hub: `${{ env.DOCKERHUB_IMAGE }}`'
+            echo '- GHCR: `${{ env.GHCR_IMAGE }}`'
+            echo '- Shared digest: `${{ steps.build.outputs.digest }}`'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,31 @@
+node_modules
+**/node_modules
+**/dist
+**/coverage
+**/*.tsbuildinfo
+
+.git
+.github
+.gitignore
+.editorconfig
+.prettierrc
+.prettierignore
+
+# Never bake secrets or runtime state into the image
+.env
+.env.*
+!.env.example
+data
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# Local map textures are copyrighted game art — mount them at runtime instead
+map
+public/map
+
+plans
+README.md
+docker-compose*.yml
+Dockerfile
