@@ -5,7 +5,7 @@ import type {
   PalworldPlayer,
   PalworldSettings,
 } from '@palsentry/shared';
-import type { PalworldConfig } from '../config.js';
+import { unconfiguredPalworldConfig, type PalworldConfig } from '../config.js';
 import type { Logger } from '../logger.js';
 import { SingleFlightCache } from './cache.js';
 import { PalworldError, describeFetchFailure } from './errors.js';
@@ -92,6 +92,11 @@ export interface ReadOptions {
   force?: boolean;
 }
 
+/** Pre-encode the Basic credential, which is the only place the password is used. */
+function basicAuthHeader(config: PalworldConfig): string {
+  return `Basic ${Buffer.from(`${config.username}:${config.password}`, 'utf8').toString('base64')}`;
+}
+
 /**
  * Typed client for the official Palworld dedicated-server REST API.
  *
@@ -103,18 +108,41 @@ export interface ReadOptions {
  * - Credentials are only ever placed in the `Authorization` header, which the logger redacts.
  */
 export class PalworldClient {
-  private readonly config: PalworldConfig;
+  // Mutable so a desktop user can point the app at a different Palworld server without restarting
+  // it. Everything derived from the connection — the `Authorization` header and any cached reads —
+  // is rebuilt by `applyConnection`.
+  private config: PalworldConfig;
+  private authorizationHeader: string;
   private readonly logger: Logger;
   private readonly cache = new SingleFlightCache();
-  private readonly authorizationHeader: string;
 
   constructor(config: PalworldConfig, logger: Logger) {
     this.config = config;
     this.logger = logger;
-    this.authorizationHeader = `Basic ${Buffer.from(
-      `${config.username}:${config.password}`,
-      'utf8',
-    ).toString('base64')}`;
+    this.authorizationHeader = basicAuthHeader(config);
+  }
+
+  /**
+   * Point this client at a different Palworld server.
+   *
+   * Cached reads are dropped: they describe the previous server, and the very next poll must
+   * reflect the new one instead of replaying a stale snapshot from the old one.
+   */
+  applyConnection(config: PalworldConfig): void {
+    this.config = config;
+    this.authorizationHeader = basicAuthHeader(config);
+    this.cache.invalidate();
+  }
+
+  /**
+   * Forget the connection.
+   *
+   * Used when a desktop user disconnects: the client keeps working (every call fails fast against
+   * the placeholder loopback address) so no caller needs a null check, but nothing is sent to the
+   * server the user just walked away from.
+   */
+  clearConnection(): void {
+    this.applyConnection(unconfiguredPalworldConfig(this.config.timeoutMs));
   }
 
   /** Absolute URL for an endpoint path, e.g. `/players`. */

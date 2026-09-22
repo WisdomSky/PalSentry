@@ -6,6 +6,8 @@ import type {
   BanRequest,
   BansResponse,
   BasesResponse,
+  ConnectionRequest,
+  ConnectionStatusResponse,
   HealthResponse,
   HistoryResponse,
   HistorySelection,
@@ -179,6 +181,11 @@ export const api = {
   me: () => request<MeResponse>('/auth/me'),
   login: (body: LoginRequest) => post<MeResponse>('/auth/login', body),
   logout: () => post<MeResponse>('/auth/logout'),
+
+  // Desktop hosting only; these routes do not exist in a container deployment.
+  connection: () => request<ConnectionStatusResponse>('/connection'),
+  connect: (body: ConnectionRequest) => post<ConnectionStatusResponse>('/connection', body),
+  disconnect: () => post<ConnectionStatusResponse>('/connection/disconnect'),
 
   meta: () => request<MetaResponse>('/meta'),
   status: () => request<StatusResponse>('/status'),

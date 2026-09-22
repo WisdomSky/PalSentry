@@ -4,9 +4,18 @@
   "private": true,
   "type": "module",
   "main": "dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts"
+    },
+    "./desktop-entry": {
+      "types": "./src/desktop-entry.ts"
+    }
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsup && node scripts/copy-web.mjs",
+    "build:desktop": "tsup --config tsup.desktop.config.ts",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json",
     "test": "node --import tsx --test test/*.test.ts",
@@ -17,7 +26,7 @@
     "@fastify/rate-limit": "^11.2.0",
     "@fastify/static": "^10.1.4",
     "@palsentry/shared": "*",
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3": "^13.0.3",
     "fastify": "^5.12.5",
     "pino": "^10.3.1",
     "zod": "^4.6.5"

@@ -248,7 +248,7 @@ Advanced local-runtime variables (`PALSENTRY_HOST`, `PALSENTRY_PORT`, `PALSENTRY
 
 ## Local development
 
-Requirements: Node.js 20.19 or newer and npm 10 or newer.
+Requirements: Node.js 22.14 or newer and npm 10 or newer (`.nvmrc` pins the version CI and the desktop release builds use).
 
 ```sh
 # Either export the required variables or copy and configure .env.example.
@@ -258,6 +258,12 @@ npm run dev
 ```
 
 Open <http://localhost:5173>. Vite proxies `/api` to the Node process on port 3000, preserving the same-origin behavior used in production.
+
+To work on the desktop app instead, run `npm run dev:desktop`. It builds the Electron main process and
+starts three processes together: a desktop-mode API (`PALSENTRY_DESKTOP=1`, data in `.desktop-dev`),
+Vite, and Electron pointed at <http://127.0.0.1:5173> through `PALSENTRY_DESKTOP_DEV_URL`, which skips
+the embedded server so the API you are editing is the one the window talks to. The window opens on the
+connection screen; point it at `npm run mock` as usual.
 
 A development compose override is also available. It carries the required Palworld connection settings, so both forms start the same development container:
 
@@ -307,6 +313,78 @@ npm run test:smoke
 
 The smoke test starts a real mock API plus the built PalSentry process on ephemeral test data and covers login, protected reads (including `/api/history`), metrics history presets and custom ranges, actions, ban history, restart recovery, audit records, SPA deep links, and game-server outage handling.
 
+## Desktop app
+
+`packages/desktop` is an Electron shell around the same server and SPA, for people who want PalSentry
+without Docker.
+
+```text
+Electron main process (window, tray, updater)
+        │  starts in-process
+        ├── Fastify + Vue SPA on 127.0.0.1:43100-43199 ──> Palworld REST API
+        └── SQLite in the per-user application data directory
+```
+
+- **Embedded server.** The shell imports the bundled server (`dist/server.js`) and starts it with
+  `startSamplers: false`, because desktop mode has no Palworld credentials until the user connects.
+  `DesktopSettingsService` owns the samplers afterwards: a successful connection starts metric
+  sampling and position recording, and disconnecting stops them again.
+- **Connection screen.** Desktop mode reports `desktop: true, authEnabled: false`, so the SPA asks for
+  the Palworld REST URL and admin password instead of a PalSentry login. The URL and username are
+  remembered in `desktop.json`; the admin password only ever lives inside the live Palworld client and
+  is required again after every launch.
+- **Port.** The shell prefers the saved port, then scans `43100`–`43199`, then asks the OS for one. It
+  binds the loopback interface only, and reuses the chosen port on the next launch.
+- **Tray.** Closing the window hides it rather than quitting, so recording continues. The tray menu
+  has Open PalSentry, Check for updates…, Restart to update (only when one is downloaded), Open log
+  folder and Quit PalSentry. `Cmd+Q`, the application menu's Quit and the tray's Quit all run the same
+  ordered shutdown (window → tray → server → SQLite) before the process exits.
+- **Updates.** `electron-updater` reads GitHub Releases. Checks only run on packaged Windows and Linux
+  builds; development builds and unsigned macOS builds report why they are skipped instead.
+  `PALSENTRY_UPDATE_FEED` points the updater at any other feed, which is how the update path is tested
+  without publishing a release.
+
+Data, logs and settings live in the per-user application data directory (`~/Library/Application
+Support/PalSentry`, `%APPDATA%\PalSentry`, `~/.config/PalSentry`): `palsentry.db`, `desktop.json` (port
+and REST URL), `window.json` (window geometry) and `logs/main.log` plus `logs/palsentry.log`.
+Unpackaged runs use a `-dev` suffix so a development app never touches real recorded history.
+
+```sh
+npm run dev:desktop       # desktop-mode API + Vite + Electron, with hot reload
+npm run build:desktop     # web build, server bundle, Electron main, staged into packages/desktop/dist
+npm run package:desktop   # electron-builder installers for this platform, into packages/desktop/release
+npm run verify:desktop    # drive the packaged app through the checks below
+```
+
+`npm run package:desktop` builds for the current platform only. CI builds every target: `--mac dmg zip
+--arm64 --x64` on macOS, `--win --x64` (NSIS) on Windows, and `--linux --x64` (AppImage and deb) on
+Linux. better-sqlite3 ships Node-API prebuilds, so packaging sets `npmRebuild: false` and unpacks the
+addon out of the asar archive; the Electron version is pinned exactly because electron-builder refuses
+ranges.
+
+### Verifying a packaged build
+
+`npm run verify:desktop` runs `packages/desktop/scripts/verify-packaged.mjs` against a real installer
+output on a real OS. It launches the app with a temporary data directory and checks the embedded
+server, the served SPA, the first-run connection screen, the SQLite schema (which proves the native
+addon loaded), the tray, external-window isolation, connecting to a mock Palworld server and
+recording, the dashboard rendering live players, recording continuing after the window is closed, and
+a clean shutdown. With `--feed-dir` it also serves a newer build as an update feed and asserts that the
+app downloads it, installs it and restarts into it.
+
+```sh
+npm run verify:desktop
+node packages/desktop/scripts/verify-packaged.mjs --app /Applications/PalSentry.app/Contents/MacOS/PalSentry
+node packages/desktop/scripts/verify-packaged.mjs --app PalSentry.exe --feed-dir packages/desktop/release
+```
+
+[`.github/workflows/desktop-release.yml`](.github/workflows/desktop-release.yml) runs the same script
+on every pull request, manual run and tag, across all four target configurations: macOS arm64
+(`macos-14`), macOS x64 (`macos-15-intel`, GitHub's x86_64 image, so nothing runs under Rosetta),
+Windows x64 and Linux x64. Windows and Linux additionally build a throwaway newer version and perform
+the real N → N+1 update, so the installer handoff is exercised rather than assumed. macOS skips that
+step because unsigned builds cannot install updates.
+
 ## Publishing containers (maintainers)
 
 [`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml) runs checks and a no-push image build for pull requests. Pushes to `main`, semantic-version tags such as `v1.2.3`, and manual runs publish one AMD64/ARM64 build to Docker Hub and GHCR with a shared digest, OCI metadata, provenance, and an SBOM.
@@ -319,6 +397,23 @@ Before the first publish:
 4. After the first GHCR push, open the package settings on GitHub and change its visibility from **Private** to **Public**. New GHCR packages are private by default.
 
 No separate GHCR token is needed. Publishing with `GITHUB_TOKEN` links the package to this repository automatically.
+
+## Publishing desktop builds (maintainers)
+
+Desktop releases are cut from the same tags as the container images:
+
+1. Bump the version in `packages/desktop/package.json`, `packages/server/src/version.ts` and the root
+   `package.json` together. The workflow's first job fails when they disagree, and on a tag it also
+   requires the tag to equal `v<version>`. The desktop version names the release, so a mismatch would
+   publish an update that no installed app can ever see.
+2. Push the tag: `git tag v1.2.3 && git push origin v1.2.3`.
+
+[`.github/workflows/desktop-release.yml`](.github/workflows/desktop-release.yml) then builds macOS
+arm64 and x64 (dmg and zip), Windows x64 (NSIS) and Linux x64 (AppImage and deb) on native runners.
+Every run uploads the installers as workflow artifacts; a tag additionally attaches them, together
+with the `latest*.yml` metadata `electron-updater` reads, to one GitHub Release. The first release is
+unsigned, so macOS users install manually and macOS builds never check for updates; code signing and
+notarisation can be added later without changing anything else.
 
 ## Troubleshooting
 

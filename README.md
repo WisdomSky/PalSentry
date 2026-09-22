@@ -42,6 +42,29 @@ Once running, PalSentry can now be accessed from the browser:
 http://localhost:3000
 ```
 
+### Desktop app
+
+PalSentry is also available as a desktop app for macOS, Windows and Linux. Download the installer for
+your platform from [GitHub Releases](https://github.com/WisdomSky/PalSentry/releases) and open it.
+
+The desktop app serves the same dashboard and runs the same recording engine locally, but collects
+the Palworld connection in the app instead of from the environment:
+
+1. Enter the Palworld REST URL and admin password on the connection screen.
+2. PalSentry checks the credentials against your server, then starts recording.
+3. The REST URL is remembered for the next launch. The admin password is never written to disk and is
+   asked for again every time the app starts.
+
+Closing the window keeps PalSentry running in the system tray so monitoring and player tracking
+continue; use the tray icon to reopen the window or to quit. The dashboard is served on a stable
+loopback port (`127.0.0.1:43100`–`43199`) that only your own machine can reach.
+
+> [!NOTE]
+> macOS builds are unsigned, so Gatekeeper blocks the first launch: open **System Settings → Privacy
+> & Security** and choose **Open Anyway**, or right-click the app and choose **Open**. Windows and
+> Linux builds update themselves from GitHub Releases, while unsigned macOS builds do not check for
+> updates and are upgraded by downloading a new version.
+
 ---
 
 ## Features
@@ -136,6 +159,10 @@ By default, server metrics are collected every minute and displayed in clean, ea
 | `PALSENTRY_MAP_PROJECTION`                 | `new`        | Map projection mode: `none`, `new` for Palworld 1.0+, or `legacy`                        |
 | `LOG_LEVEL`                                | `info`       | Logging level: `fatal`, `error`, `warn`, `info`, `debug`, `trace`, or `silent`           |
 
+`PALWORLD_REST_URL` and `PALWORLD_ADMIN_PASSWORD` are required by the container image and by
+`npm start`; the [desktop app](#desktop-app) collects them in the app instead, so they are optional
+there.
+
 Without overrides, the dashboard login is `admin` / `admin`, the session secret uses the documented shared default, and destructive actions are enabled. These defaults are convenient on a trusted local network; before exposing PalSentry, add safer overrides under `environment`.
 
 ```yaml
@@ -171,6 +198,20 @@ services:
 
 This allows historical metrics, player information, and other persistent data to survive container upgrades and recreation.
 
+The desktop app keeps the same database, together with its own settings and logs, in the per-user
+application data directory:
+
+| Platform | Location                                  |
+| -------- | ----------------------------------------- |
+| macOS    | `~/Library/Application Support/PalSentry` |
+| Windows  | `%APPDATA%\PalSentry`                     |
+| Linux    | `~/.config/PalSentry`                     |
+
+`palsentry.db` holds the recorded history, `desktop.json` remembers the port and the Palworld REST
+URL, `window.json` remembers the window geometry, and `logs/main.log` and `logs/palsentry.log` hold
+the app and server logs. **Open log folder** in the tray menu and **Open data folder** in the
+application menu open these for you.
+
 ## Security
 
 PalSentry exposes administrative functionality for your Palworld server, so it should be treated as a privileged service.
@@ -202,3 +243,10 @@ docker pull wisdomsky/palsentry:latest
 ```
 
 Then recreate your container using the same `/data` volume. If you overrode `PALSENTRY_SESSION_SECRET`, reuse the same value to keep existing sessions valid.
+
+### Desktop app
+
+Windows and Linux builds check GitHub Releases shortly after launch and download a new version in the
+background. When one is ready, choose **Restart to update** from the tray or the application menu; you
+can also check by hand with **Check for updates…**. macOS builds are unsigned and therefore do not
+check for updates — download the new version from GitHub Releases and replace the app.

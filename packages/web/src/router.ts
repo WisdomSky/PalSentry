@@ -94,6 +94,15 @@ router.beforeEach(async (to) => {
 });
 
 router.afterEach((to) => {
-  const title = typeof to.meta.title === 'string' ? to.meta.title : null;
+  const session = useSessionStore();
+  // The desktop app has no login to sign in to, so the connection screen titles itself
+  // accordingly — this string is the OS window/tab title the user is looking at.
+  const title =
+    to.name === 'login' && session.desktop
+      ? 'Connect'
+      : typeof to.meta.title === 'string'
+        ? to.meta.title
+        : null;
+
   document.title = title === null ? 'PalSentry' : `${title} · PalSentry`;
 });

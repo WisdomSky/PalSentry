@@ -1,0 +1,355 @@
+name: Desktop release
+
+# Packages the Electron app natively on macOS, Windows and Linux.
+#
+# - Pull requests and manual runs build the installers and upload them as workflow artifacts, so a
+#   change can be smoke-tested on a real OS without publishing anything.
+# - Tag pushes (`v1.2.3`) additionally publish to one GitHub Release, together with the
+#   `latest*.yml` metadata `electron-updater` reads. The tag must equal the packaged version: the
+#   release is created at `v<version>` from `packages/desktop/package.json`, so a mismatch would
+#   publish an update that no installed app can ever see.
+#
+# Every run then installs and drives the packaged app on all four target configurations
+# (macOS arm64, macOS x64, Windows x64, Linux x64) with `scripts/verify-packaged.mjs`. That script
+# covers what unit tests cannot: the native SQLite addon, the tray, the embedded server, and — on
+# Windows and Linux, where updates actually install — a real N → N+1 update against a locally built
+# newer version. macOS x64 runs on GitHub's x86_64 image rather than under Rosetta.
+#
+# Correctness checks (formatting, type-check, unit tests, smoke tests, Compose validation) live in
+# `docker-publish.yml`, which also runs on tags; this workflow only builds and ships binaries.
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/desktop-release.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'packages/desktop/**'
+      - 'packages/server/**'
+      - 'packages/shared/**'
+      - 'packages/web/**'
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+jobs:
+  versions:
+    name: Version consistency
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The app reports two versions: `app.getVersion()` (from the desktop package, which also names
+      # the release tag and therefore the update feed) and `APP_VERSION` (served by the API and shown
+      # in the UI). They are written in different files, so they drift silently — and a drifted
+      # release tag is an update nobody can install.
+      - name: Check the tag and the packaged versions agree
+        env:
+          TAG: ${{ github.ref_name }}
+          IS_TAG: ${{ github.ref_type == 'tag' }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+
+          const desktop = JSON.parse(readFileSync('packages/desktop/package.json', 'utf8')).version;
+          const server = readFileSync('packages/server/src/version.ts', 'utf8').match(
+            /APP_VERSION\s*=\s*'([^']+)'/,
+          )?.[1];
+          const root = JSON.parse(readFileSync('package.json', 'utf8')).version;
+
+          const found = { desktop, server, root };
+          console.log('versions:', found);
+
+          const mismatched = Object.entries(found).filter(([, value]) => value !== desktop);
+          if (mismatched.length > 0) {
+            for (const [where, value] of mismatched) {
+              console.error(
+                `::error::packages/${where} reports ${value} but the desktop app is ${desktop}; bump them together.`,
+              );
+            }
+            process.exit(1);
+          }
+
+          if (process.env.IS_TAG === 'true') {
+            const expected = `v${desktop}`;
+            if (process.env.TAG !== expected) {
+              console.error(
+                `::error::tag ${process.env.TAG} does not match the packaged version ${desktop} (expected ${expected}).`,
+              );
+              process.exit(1);
+            }
+            console.log(`tag ${process.env.TAG} matches the packaged version`);
+          }
+          NODE
+
+  package:
+    name: Package (${{ matrix.platform }})
+    needs: versions
+    runs-on: ${{ matrix.os }}
+    permissions:
+      # Needed to create the release on tag builds. Pull requests never publish.
+      contents: write
+    strategy:
+      # One platform failing should still show what the other two produced.
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos
+            os: macos-14
+            # Both macOS architectures from the arm64 runner: nothing is compiled while packaging
+            # (`npmRebuild: false`), and better-sqlite3 ships Node-API prebuilds for every platform,
+            # so the x64 bundle is a straight copy rather than a cross-compile.
+            args: --mac dmg zip --arm64 --x64
+          - platform: windows
+            os: windows-latest
+            args: --win --x64
+          - platform: linux
+            os: ubuntu-latest
+            args: --linux --x64
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the desktop app
+        run: npm run build:desktop
+
+      - name: Package
+        working-directory: packages/desktop
+        shell: bash
+        env:
+          # electron-builder's GitHub publisher reads this. It is the workflow's own token, and it
+          # only has write access on tag builds.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          publish="${{ github.event_name == 'push' && 'always' || 'never' }}"
+          echo "packaging ${{ matrix.args }} with --publish $publish"
+          npx electron-builder ${{ matrix.args }} --publish "$publish"
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: palsentry-${{ matrix.platform }}
+          if-no-files-found: error
+          path: |
+            packages/desktop/release/*.dmg
+            packages/desktop/release/*.zip
+            packages/desktop/release/*.exe
+            packages/desktop/release/*.AppImage
+            packages/desktop/release/*.deb
+            packages/desktop/release/latest*.yml
+
+  verify:
+    name: Verify (${{ matrix.platform }})
+    needs: package
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      # Downloading the artifacts the package job produced in this same run.
+      actions: read
+    strategy:
+      # A failing platform should still show what the others verified.
+      fail-fast: false
+      matrix:
+        include:
+          # Both macOS architectures run natively: macos-15-intel is GitHub's x86_64 image, and it is
+          # the only supported way left to exercise the x64 build without Rosetta.
+          # electron-builder only puts the architecture in the file name when it is not the default
+          # one, so the arm64 zip is `...-arm64-mac.zip` while the x64 zip is plain `...-mac.zip`.
+          - platform: macOS arm64
+            os: macos-14
+            arch: arm64
+            artifact: palsentry-macos
+            zip_glob: '*-arm64-mac.zip'
+            zip_exclude: ''
+          - platform: macOS x64
+            os: macos-15-intel
+            arch: x86_64
+            artifact: palsentry-macos
+            zip_glob: '*-mac.zip'
+            zip_exclude: '-arm64-'
+          - platform: Windows x64
+            os: windows-latest
+            artifact: palsentry-windows
+            package_args: --win --x64
+          - platform: Linux x64
+            os: ubuntu-latest
+            artifact: palsentry-linux
+            package_args: --linux AppImage --x64
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Remember the packaged version
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./packages/desktop/package.json').version")
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Download the installers the package job built
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: .verify/artifacts
+
+      # --- get an app to run -------------------------------------------------
+      - name: Unpack the macOS app
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p .verify/app
+          zip=$(ls .verify/artifacts/${{ matrix.zip_glob }})
+          if [ -n "${{ matrix.zip_exclude }}" ]; then
+            zip=$(echo "$zip" | grep -v -- '${{ matrix.zip_exclude }}')
+          fi
+          zip=$(echo "$zip" | head -1)
+          echo "unpacking $(basename "$zip")"
+          unzip -q "$zip" -d .verify/app
+
+          app="$PWD/.verify/app/PalSentry.app/Contents/MacOS/PalSentry"
+          # The whole point of the two macOS jobs is the architecture, so assert it instead of
+          # trusting the file name.
+          found=$(lipo -archs "$app")
+          if [ "$found" != "${{ matrix.arch }}" ]; then
+            echo "::error::$app is built for $found, not ${{ matrix.arch }}"
+            exit 1
+          fi
+
+          echo "app=$app" >> "$GITHUB_ENV"
+
+      - name: Install the Windows app
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem .verify/artifacts/*.exe | Select-Object -First 1
+          Write-Host "installing $($installer.Name)"
+          Start-Process -FilePath $installer.FullName -ArgumentList '/S' -Wait
+
+          $app = Join-Path $env:LOCALAPPDATA 'Programs/PalSentry/PalSentry.exe'
+          for ($i = 0; $i -lt 90 -and -not (Test-Path $app); $i++) { Start-Sleep -Seconds 2 }
+          if (-not (Test-Path $app)) { throw "the installer did not create $app" }
+          Write-Host "installed to $app"
+
+          "app=$app" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Prepare the Linux AppImage
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libfuse2t64 || sudo apt-get install -y -qq libfuse2
+          chmod +x .verify/artifacts/*.AppImage
+          echo "app=$PWD/.verify/artifacts/$(ls .verify/artifacts | grep -m1 '\.AppImage$')" >> "$GITHUB_ENV"
+
+      # --- build the version the update should install -----------------------
+      # The update check needs a genuinely newer build to install. Bumping a throwaway version here
+      # keeps the test self-contained: it never depends on an already published release.
+      - name: Build the next version for the update check
+        if: runner.os != 'macOS'
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+
+          const desktopPath = 'packages/desktop/package.json';
+          const versionPath = 'packages/server/src/version.ts';
+          const current = JSON.parse(readFileSync(desktopPath, 'utf8')).version;
+          const [major, minor, patch] = current.split('.').map(Number);
+          const next = `${major}.${minor}.${patch + 1}`;
+
+          const desktop = JSON.parse(readFileSync(desktopPath, 'utf8'));
+          desktop.version = next;
+          writeFileSync(desktopPath, `${JSON.stringify(desktop, null, 2)}\n`);
+          writeFileSync(
+            versionPath,
+            readFileSync(versionPath, 'utf8').replace(/APP_VERSION = '[^']+'/, `APP_VERSION = '${next}'`),
+          );
+
+          console.log(`update target: ${current} -> ${next}`);
+          NODE
+
+          npm run build:desktop
+          cd packages/desktop
+          npx electron-builder ${{ matrix.package_args }} --publish never
+
+      # --- run it ------------------------------------------------------------
+      - name: Verify the packaged app
+        shell: bash
+        run: |
+          args=(--app "$app" --expect-version "$VERSION")
+          if [ "${{ runner.os }}" != "macOS" ]; then
+            # Serve the newer build from this machine instead of GitHub Releases, and let the app
+            # install it exactly as a released update would.
+            args+=(--feed-dir packages/desktop/release)
+          fi
+
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            # A headless runner has no sandbox user namespaces and no GPU.
+            args+=(--extra-arg=--no-sandbox --extra-arg=--disable-gpu --extra-arg=--disable-dev-shm-usage)
+            xvfb-run -a node packages/desktop/scripts/verify-packaged.mjs "${args[@]}"
+          else
+            node packages/desktop/scripts/verify-packaged.mjs "${args[@]}"
+          fi
+
+      - name: Stop anything still running
+        if: always()
+        shell: bash
+        run: |
+          case "${{ runner.os }}" in
+            macOS) pkill -f '[P]alSentry.app/Contents/MacOS/PalSentry' || true ;;
+            Linux) pkill -f '[P]alSentry' || true ;;
+            Windows) taskkill //IM PalSentry.exe //F || true ;;
+          esac
+
+  release:
+    name: Summarize release
+    needs: [package, verify]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Describe the published release
+        run: |
+          {
+            echo '### Published desktop release'
+            echo
+            echo "Release: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}"
+            echo
+            echo 'Artifacts: macOS dmg/zip (arm64, x64), Windows NSIS installer, Linux AppImage/deb,'
+            echo 'plus `latest.yml`, `latest-mac.yml` and `latest-linux.yml` for `electron-updater`.'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,86 @@
+# electron-builder configuration for the PalSentry desktop app.
+#
+# Run through the package scripts (`npm run package:mac`, `-win`, `-linux`, or `package` for the
+# current platform), which build the server bundle, the SPA and the shell into `dist/` first.
+#
+# Artifacts land in `release/` (git-ignored) and, when published, beside `latest*.yml` metadata in
+# one GitHub Release — that metadata is what electron-updater reads.
+
+appId: com.palsentry.app
+productName: PalSentry
+copyright: PalSentry contributors
+
+directories:
+  buildResources: build
+  # Not `dist`: that is the staged application (main.js, server.js, public/, assets/).
+  output: release
+
+# Everything the app needs at runtime is already assembled in `dist/` by `scripts/stage.mjs`, plus
+# the production dependencies of this package — which is exactly `better-sqlite3`.
+files:
+  - dist/**/*
+  - package.json
+  - '!**/*.map'
+
+asar: true
+
+# better-sqlite3 is a native addon and cannot be loaded from inside an asar archive. The whole
+# package is unpacked so the addon's own resolution (prebuilds/ or build/Release/) keeps working.
+asarUnpack:
+  - '**/node_modules/better-sqlite3/**'
+
+# The v13 line ships per-platform Node-API prebuilds that load under Electron unchanged — verified
+# against Electron 44 (ABI 149) before this config existed. Rebuilding would need a C++ toolchain on
+# every runner and buys nothing, so it is off. If Electron ever outruns those prebuilds, delete this
+# line and add @electron/rebuild to the release workflow.
+npmRebuild: false
+
+# Unsigned for now: there is no Developer ID certificate, so signing would fail the build. macOS
+# users download the dmg/zip manually and pass Gatekeeper once. Remove `identity: null` when signing
+# credentials exist, and note that auto-update on macOS only starts working at that point.
+mac:
+  category: public.app-category.utilities
+  icon: build/icon.png
+  identity: null
+  notarize: false
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+
+win:
+  icon: build/icon.png
+  target:
+    - target: nsis
+      arch: [x64]
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+
+linux:
+  icon: build/icon.png
+  category: Utility
+  synopsis: Palworld server dashboard
+  description: >-
+    PalSentry monitors a Palworld dedicated server: live players and bases, performance metrics,
+    bans and audit history, and a replayable map of where everyone has been.
+  maintainer: PalSentry <wisdomsky@users.noreply.github.com>
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+
+# electron-updater reads this at runtime; the release workflow publishes to the same place.
+publish:
+  provider: github
+  owner: wisdomsky
+  repo: palsentry
+  releaseType: release

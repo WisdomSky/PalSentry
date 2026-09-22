@@ -14,6 +14,23 @@ const DEFAULT_PALSENTRY_LOGIN_PASSWORD = 'admin';
 const DEFAULT_PALSENTRY_SESSION_SECRET =
   'bb5930c05402c03f897c0cdd0e98bb8420a8359f7dbab25fe53df1a5c060d5ea';
 
+/**
+ * Where the Palworld client points before a desktop connection exists.
+ *
+ * Reserved port 1 on loopback: connection attempts fail immediately with a clear network error
+ * instead of hanging, and there is no chance of reaching a real service by accident.
+ */
+export const UNCONFIGURED_API_BASE_URL = 'http://127.0.0.1:1/v1/api';
+
+/**
+ * The connection a Palworld client holds before (or after) a desktop connection exists.
+ *
+ * Exported so the desktop settings service and the initial config agree on the same inert target.
+ */
+export function unconfiguredPalworldConfig(timeoutMs: number): PalworldConfig {
+  return { apiBaseUrl: UNCONFIGURED_API_BASE_URL, username: 'admin', password: '', timeoutMs };
+}
+
 /** Thrown when the environment is unusable. The entrypoint prints this and exits non-zero. */
 export class ConfigError extends Error {
   constructor(message: string) {
@@ -41,6 +58,21 @@ export interface AuthConfig {
   secureCookies: boolean;
 }
 
+/**
+ * Desktop (Electron) hosting state.
+ *
+ * The shell sets `PALSENTRY_DESKTOP=1` and passes the Palworld connection it holds. Because the
+ * desktop app asks for the admin password on every launch, a boot with a REST URL but no password
+ * is a normal, expected state: the server starts, serves the connection screen, and waits.
+ */
+export interface DesktopConfig {
+  enabled: boolean;
+  /** Where the shell persists the connection. `null` outside desktop mode. */
+  configPath: string | null;
+  /** True when a REST URL *and* password were supplied at boot, so the app can connect directly. */
+  configured: boolean;
+}
+
 export interface AppConfig {
   nodeEnv: 'development' | 'production' | 'test';
   port: number;
@@ -51,6 +83,7 @@ export interface AppConfig {
   dbPath: string;
   palworld: PalworldConfig;
   auth: AuthConfig;
+  desktop: DesktopConfig;
   allowDestructive: boolean;
   history: {
     retentionDays: number;
@@ -75,17 +108,11 @@ export interface AppConfig {
 // ---------------------------------------------------------------------------
 
 /**
- * A required, non-empty string.
+ * An optional string, trimmed, `null` when unset or blank.
  *
- * Missing values are preprocessed to `''` so the failure message is ours rather than zod's
- * type error, which reads poorly for environment variables.
+ * Required fields are declared optional in the schema and enforced after parsing, because desktop
+ * mode legitimately starts without Palworld credentials — see {@link DesktopConfig}.
  */
-const requiredString = (message: string) =>
-  z.preprocess(
-    (value) => (typeof value === 'string' ? value.trim() : ''),
-    z.string().min(1, message),
-  );
-
 const optionalString = () =>
   z
     .string()
@@ -154,22 +181,31 @@ const envEnum = <const T extends readonly [string, ...string[]]>(
     });
 
 /**
- * Secrets are read verbatim — never trimmed.
+ * Messages for the two Palworld values.
  *
- * Silently trimming a password would make a credential that legitimately starts or ends with a
- * space impossible to use, and would turn a stray space in `.env` into a confusing auth failure.
- * Instead we keep the value exact and warn about surrounding whitespace at startup.
+ * Named so the desktop path can report the *same* text after parsing: desktop mode makes these
+ * fields optional in the schema (the connection screen may supply them later) and enforces them
+ * itself when the flag is absent.
  */
-const secretString = (message: string) =>
-  z.preprocess((value) => (typeof value === 'string' ? value : ''), z.string().min(1, message));
+const PALWORLD_REST_URL_REQUIRED =
+  'PALWORLD_REST_URL is required, e.g. http://192.168.1.50:8212 (the host and RESTAPIPort of your Palworld server)';
+const PALWORLD_ADMIN_PASSWORD_REQUIRED =
+  'PALWORLD_ADMIN_PASSWORD is required (the AdminPassword from your PalWorldSettings.ini)';
+
+/** The same `Invalid configuration` block the schema path produces, for one named field. */
+function missingFieldError(key: string, message: string): ConfigError {
+  return new ConfigError(
+    `Invalid configuration:\n  • ${key}\n      ${message}\n      current: not set\n\n` +
+      `See .env.example for a documented template.`,
+  );
+}
 
 const envSchema = z.object({
   NODE_ENV: envEnum(['development', 'production', 'test'] as const, 'development'),
 
   // --- Palworld server ---
-  PALWORLD_REST_URL: requiredString(
-    'PALWORLD_REST_URL is required, e.g. http://192.168.1.50:8212 (the host and RESTAPIPort of your Palworld server)',
-  ),
+  // Optional in the schema and enforced below: desktop mode legitimately starts without them.
+  PALWORLD_REST_URL: optionalString(),
   PALSERVER_REST_USERNAME: z
     .string()
     .optional()
@@ -177,9 +213,11 @@ const envSchema = z.object({
       const trimmed = value?.trim();
       return trimmed === undefined || trimmed === '' ? 'admin' : trimmed;
     }),
-  PALWORLD_ADMIN_PASSWORD: secretString(
-    'PALWORLD_ADMIN_PASSWORD is required (the AdminPassword from your PalWorldSettings.ini)',
-  ),
+  // Never trimmed: a password that starts or ends with a space is valid and must stay exact.
+  PALWORLD_ADMIN_PASSWORD: z
+    .string()
+    .optional()
+    .transform((value) => value ?? ''),
   PALSERVER_TIMEOUT_MS: envInt(10_000, 500, 120_000),
 
   // --- PalSentry auth ---
@@ -209,7 +247,9 @@ const envSchema = z.object({
   PALSENTRY_TRUST_PROXY: envBool(false),
 
   // --- PalSentry runtime ---
-  PALSENTRY_PORT: envInt(3000, 1, 65_535),
+  // 0 asks the OS for a free port. The desktop shell uses that when its usual port is taken; the
+  // bound port is reported back by `startPalSentry`.
+  PALSENTRY_PORT: envInt(3000, 0, 65_535),
   PALSENTRY_HOST: z
     .string()
     .optional()
@@ -219,6 +259,9 @@ const envSchema = z.object({
     }),
   PALSENTRY_DATA_DIR: optionalString(),
   PALSENTRY_DB_PATH: optionalString(),
+  // Desktop hosting. The shell owns the config file; this only tells the server where it lives.
+  PALSENTRY_DESKTOP: envBool(false),
+  PALSENTRY_DESKTOP_CONFIG: optionalString(),
   PALSENTRY_ALLOW_DESTRUCTIVE: envBool(true),
   PALSENTRY_HISTORY_RETENTION_DAYS: envInt(30, 1, 3650),
   PALSENTRY_SAMPLE_INTERVAL_SECONDS: envInt(60, 5, 3600),
@@ -293,6 +336,8 @@ function normaliseApiBaseUrl(raw: string): string {
   return url.toString().replace(/\/$/, '');
 }
 
+export { normaliseApiBaseUrl };
+
 /** Parse and validate the environment. Throws {@link ConfigError} with actionable detail. */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const result = envSchema.safeParse(env);
@@ -306,6 +351,24 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 
   const parsed = result.data;
   const warnings: string[] = [];
+
+  // ---- Desktop hosting -----------------------------------------------------
+  // The Electron shell sets this flag and supplies whatever connection it already knows. Without a
+  // password the server still starts and serves the connection screen; every other deployment
+  // path keeps the hard requirement below.
+  const desktopEnabled = parsed.PALSENTRY_DESKTOP;
+  const palworldRestUrl = parsed.PALWORLD_REST_URL;
+  const palworldPassword = parsed.PALWORLD_ADMIN_PASSWORD;
+  const desktopConfigured = palworldRestUrl !== null && palworldPassword !== '';
+
+  if (!desktopEnabled) {
+    if (palworldRestUrl === null) {
+      throw missingFieldError('PALWORLD_REST_URL', PALWORLD_REST_URL_REQUIRED);
+    }
+    if (palworldPassword === '') {
+      throw missingFieldError('PALWORLD_ADMIN_PASSWORD', PALWORLD_ADMIN_PASSWORD_REQUIRED);
+    }
+  }
 
   // ---- Auth: resolve the password hash -------------------------------------
   let passwordHash: string;
@@ -331,10 +394,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     passwordHash = hashPassword(parsed.PALSENTRY_LOGIN_PASSWORD);
     passwordIsPlaintext = true;
     if (parsed.PALSENTRY_LOGIN_PASSWORD === DEFAULT_PALSENTRY_LOGIN_PASSWORD) {
-      warnings.push(
-        'PALSENTRY_LOGIN_PASSWORD is using the default value "admin". Change it before exposing ' +
-          'PalSentry beyond a trusted local network.',
-      );
+      if (!desktopEnabled) {
+        warnings.push(
+          'PALSENTRY_LOGIN_PASSWORD is using the default value "admin". Change it before exposing ' +
+            'PalSentry beyond a trusted local network.',
+        );
+      }
     } else {
       warnings.push(
         'PALSENTRY_LOGIN_PASSWORD is stored in plaintext. This is fine for a local .env, but you can ' +
@@ -361,10 +426,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     );
   }
   if (parsed.PALSENTRY_SESSION_SECRET === DEFAULT_PALSENTRY_SESSION_SECRET) {
-    warnings.push(
-      'PALSENTRY_SESSION_SECRET is using the shared default value. Replace it with a random secret ' +
-        'before exposing PalSentry beyond a trusted local network.',
-    );
+    if (!desktopEnabled) {
+      warnings.push(
+        'PALSENTRY_SESSION_SECRET is using the shared default value. Replace it with a random secret ' +
+          'before exposing PalSentry beyond a trusted local network.',
+      );
+    }
   }
 
   // ---- Paths ---------------------------------------------------------------
@@ -389,7 +456,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   ];
 
   // ---- Non-fatal guidance --------------------------------------------------
-  if (parsed.PALSENTRY_ALLOW_DESTRUCTIVE) {
+  // Skipped in desktop mode: the app listens on loopback only and has no PalSentry login, so
+  // warnings about public exposure and cookie security would be noise the operator cannot act on.
+  if (parsed.PALSENTRY_ALLOW_DESTRUCTIVE && !desktopEnabled) {
     warnings.push(
       'PALSENTRY_ALLOW_DESTRUCTIVE=true — kick, ban, unban, shutdown, stop, and restart are enabled. ' +
         'Make sure PalSentry is not reachable from the public internet.',
@@ -416,7 +485,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     );
   }
 
-  if (parsed.NODE_ENV === 'production' && parsed.PALSENTRY_TRUST_PROXY === false) {
+  if (
+    !desktopEnabled &&
+    parsed.NODE_ENV === 'production' &&
+    parsed.PALSENTRY_TRUST_PROXY === false
+  ) {
     warnings.push(
       'PALSENTRY_TRUST_PROXY=false, so the session cookie is not marked Secure. Set it to true ' +
         'when PalSentry is served over HTTPS/TLS by a reverse proxy.',
@@ -432,9 +505,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     dataDir,
     dbPath,
     palworld: {
-      apiBaseUrl: normaliseApiBaseUrl(parsed.PALWORLD_REST_URL),
+      // Desktop mode without credentials points at a loopback port nothing listens on, so every
+      // upstream call fails fast and the UI shows its normal "server offline" state until the
+      // connection screen supplies real values.
+      apiBaseUrl:
+        palworldRestUrl === null ? UNCONFIGURED_API_BASE_URL : normaliseApiBaseUrl(palworldRestUrl),
       username: parsed.PALSERVER_REST_USERNAME,
-      password: parsed.PALWORLD_ADMIN_PASSWORD,
+      password: palworldPassword,
       timeoutMs: parsed.PALSERVER_TIMEOUT_MS,
     },
     auth: {
@@ -444,6 +521,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       sessionSecret: parsed.PALSENTRY_SESSION_SECRET,
       sessionTtlHours: parsed.PALSENTRY_SESSION_TTL_HOURS,
       secureCookies: parsed.PALSENTRY_TRUST_PROXY,
+    },
+    desktop: {
+      enabled: desktopEnabled,
+      configPath:
+        parsed.PALSENTRY_DESKTOP_CONFIG === null
+          ? null
+          : path.resolve(parsed.PALSENTRY_DESKTOP_CONFIG),
+      configured: desktopConfigured,
     },
     allowDestructive: parsed.PALSENTRY_ALLOW_DESTRUCTIVE,
     history: {

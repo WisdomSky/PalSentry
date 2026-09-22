@@ -7,6 +7,7 @@ import { HttpError, errorBody, parseOrThrow } from '../http/errors.js';
 import { loginSchema } from '../http/schemas.js';
 import { APP_VERSION } from '../version.js';
 import { readSession } from '../plugins/session.js';
+import { desktopConnectionRoutes } from './desktop.js';
 import type { HealthResponse } from '@palsentry/shared';
 
 /**
@@ -66,31 +67,50 @@ export function publicApiRoutes(ctx: AppContext) {
         );
 
         logger.info({ ip: request.ip, username: config.auth.username }, 'Signed in');
-        return { authenticated: true, user: { username: config.auth.username } };
+        return {
+          authenticated: true,
+          user: { username: config.auth.username },
+          desktop: false,
+        };
       },
     );
 
     app.post('/auth/logout', async (request, reply): Promise<MeResponse> => {
       reply.clearCookie(SESSION_COOKIE_NAME, { path: '/' });
       logger.info({ ip: request.ip }, 'Signed out');
-      return { authenticated: false, user: null };
+      return { authenticated: false, user: null, desktop: config.desktop.enabled };
     });
 
     /** Used by the SPA on boot to decide between the login screen and the dashboard. */
     app.get('/auth/me', async (request, reply): Promise<MeResponse> => {
       const session = readSession(request, config);
+      const desktop = config.desktop.enabled;
+
       if (session === null) {
-        return { authenticated: false, user: null };
+        return { authenticated: false, user: null, desktop };
       }
-      // Keeps an active session alive: a session's expiry is baked into the cookie, so without
-      // reissuing it an admin working through a long session would be logged out mid-task.
-      reply.setCookie(
-        SESSION_COOKIE_NAME,
-        createSessionValue(config.auth.username, config.auth.sessionTtlHours),
-        cookieOptions,
-      );
-      return { authenticated: true, user: session };
+
+      // Desktop mode has no session to keep alive — reissuing a cookie there would only set a
+      // credential nothing ever reads.
+      if (!desktop) {
+        // Keeps an active session alive: a session's expiry is baked into the cookie, so without
+        // reissuing it an admin working through a long session would be logged out mid-task.
+        reply.setCookie(
+          SESSION_COOKIE_NAME,
+          createSessionValue(config.auth.username, config.auth.sessionTtlHours),
+          cookieOptions,
+        );
+      }
+
+      return { authenticated: true, user: session, desktop };
     });
+
+    // Desktop hosting only: the connection screen must be reachable *before* there is a session,
+    // because in that mode "connected" and "signed in" are the same thing. These routes therefore
+    // live in the public plugin and carry their own content-type guard instead of the session one.
+    if (config.desktop.enabled) {
+      await app.register(desktopConnectionRoutes(ctx));
+    }
 
     /** Explicit JSON 404 for unknown public routes, so /api never returns an HTML page. */
     app.setNotFoundHandler((request, reply) => {

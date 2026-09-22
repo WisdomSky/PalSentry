@@ -69,6 +69,36 @@ export interface SessionUser {
 export interface MeResponse {
   authenticated: boolean;
   user: SessionUser | null;
+  /**
+   * True when the desktop app is hosting this server.
+   *
+   * There is no login in that mode: "authenticated" means "connected to a Palworld server", and
+   * the SPA renders the connection screen instead of the sign-in form.
+   */
+  desktop: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Desktop connection
+// ---------------------------------------------------------------------------
+
+/** What the desktop connection screen needs to render itself. */
+export interface ConnectionStatusResponse {
+  /** Always true — the route only exists in desktop mode. */
+  desktop: boolean;
+  /** True once a Palworld connection has been probed and accepted. */
+  configured: boolean;
+  /** Last accepted REST URL, kept so the form can prefill it. Never includes a password. */
+  restUrl: string | null;
+  /** Basic-auth username used for the REST API. */
+  username: string;
+}
+
+/** Body of the desktop connect request. The password is used once and never stored. */
+export interface ConnectionRequest {
+  restUrl: string;
+  adminPassword: string;
+  username?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -88,7 +118,10 @@ export interface MapMeta {
 export interface MetaResponse {
   app: {
     version: string;
-    authEnabled: true;
+    /** False in desktop mode, where the Palworld connection replaces the PalSentry login. */
+    authEnabled: boolean;
+    /** True when the desktop app is hosting this server. */
+    desktop: boolean;
   };
   /** `PALSENTRY_ALLOW_DESTRUCTIVE` — when false the UI disables and the API rejects these. */
   destructiveAllowed: boolean;

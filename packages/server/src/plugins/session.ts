@@ -1,6 +1,7 @@
 import type { SessionUser } from '@palsentry/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { AppConfig } from '../config.js';
+import { DESKTOP_SESSION_USERNAME } from '../auth/session.js';
 import { errorBody } from '../http/errors.js';
 import { SESSION_COOKIE_NAME, parseSessionValue } from '../auth/session.js';
 
@@ -16,8 +17,16 @@ declare module 'fastify' {
  *
  * Two independent checks: `@fastify/cookie` verifies the HMAC signature, then
  * {@link parseSessionValue} checks the payload is well-formed and unexpired.
+ *
+ * Desktop hosting has no login at all: there the Palworld connection *is* the session, so this
+ * reports one exactly while a probed connection is in force. The auth guard, `/auth/me` and the
+ * SPA's router all keep working unchanged, and "connected" and "signed in" stay the same idea.
  */
 export function readSession(request: FastifyRequest, config: AppConfig): SessionUser | null {
+  if (config.desktop.enabled) {
+    return config.desktop.configured ? { username: DESKTOP_SESSION_USERNAME } : null;
+  }
+
   const raw = request.cookies[SESSION_COOKIE_NAME];
   if (raw === undefined) return null;
 
