@@ -12,7 +12,7 @@
  *   tinted by the menu bar to match light and dark modes.
  * - `assets/tray/tray.png` (+`@2x`) — the coloured mark used by Windows and Linux trays.
  *
- * Run with `npm run icons -w @palsentry/desktop`.
+ * Run with `npm run icons -w palsentrydesktop`.
  */
 
 import { mkdirSync, writeFileSync } from 'node:fs';

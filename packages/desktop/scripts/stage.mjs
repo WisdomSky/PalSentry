@@ -60,7 +60,7 @@ await requirePath(
 );
 await requirePath(
   path.join(trayAssets, 'tray.png'),
-  'Generate icons first: npm run icons -w @palsentry/desktop',
+  'Generate icons first: npm run icons -w palsentrydesktop',
 );
 
 await mkdir(dist, { recursive: true });

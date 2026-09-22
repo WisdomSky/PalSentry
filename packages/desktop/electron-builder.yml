@@ -73,9 +73,9 @@ nsis:
 linux:
   icon: build/icon.png
   category: Utility
-  # Linux names the binary after the package name — `@palsentry/desktop` for this workspace package,
-  # which is not even a legal file name and makes AppImage packaging fail outright. Keep it
-  # lowercase, the way Linux expects a command to be spelled.
+  # Linux names the binary after the package name — `palsentrydesktop` now, and the scoped
+  # `@palsentry/desktop` before the rename, which is not even a legal file name and made AppImage
+  # packaging fail outright. Keep it lowercase, the way Linux expects a command to be spelled.
   executableName: palsentry
   # Electron uses package.json's `desktopName` as its app_id/WM_CLASS on Wayland. Naming the
   # installed .desktop file after it lets desktops link the running window to the launcher entry.

@@ -329,6 +329,11 @@ Electron main process (window, tray, updater)
   `startSamplers: false`, because desktop mode has no Palworld credentials until the user connects.
   `DesktopSettingsService` owns the samplers afterwards: a successful connection starts metric
   sampling and position recording, and disconnecting stops them again.
+- **Electron's binary after `npm ci`.** npm 11.19 and later gate install scripts behind an approval
+  step, so Electron's postinstall does not run and `node_modules/electron/dist` is missing — which
+  fails packaging with a confusing "Electron failed to install correctly". Run
+  `node node_modules/electron/install.js` (or `npm install-scripts approve electron`) once. CI uses
+  the npm bundled with Node 22 and is unaffected.
 - **Connection screen.** Desktop mode reports `desktop: true, authEnabled: false`, so the SPA asks for
   the Palworld REST URL and admin password instead of a PalSentry login. The URL and username are
   remembered in `desktop.json`; the admin password only ever lives inside the live Palworld client and
