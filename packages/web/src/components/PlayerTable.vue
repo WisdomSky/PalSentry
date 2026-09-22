@@ -35,7 +35,7 @@ const props = withDefaults(
     showLastOnline: false,
     showBuildingCount: true,
     showBanAction: true,
-    showKickAction: true
+    showKickAction: true,
   },
 );
 

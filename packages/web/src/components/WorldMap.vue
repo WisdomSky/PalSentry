@@ -863,12 +863,12 @@ const textureVariable = computed(() =>
             class="h-6 w-6 text-slate-300 dark:text-slate-700"
             aria-hidden="true"
           />
-<!--          <p class="text-xs text-slate-500 dark:text-slate-400">-->
-<!--            <template v-if="waybackActive">-->
-<!--              Nobody recorded on {{ activeDefinition.label }} at this time.-->
-<!--            </template>-->
-<!--            <template v-else-if="!online">Server offline — no positions available.</template>-->
-<!--          </p>-->
+          <!--          <p class="text-xs text-slate-500 dark:text-slate-400">-->
+          <!--            <template v-if="waybackActive">-->
+          <!--              Nobody recorded on {{ activeDefinition.label }} at this time.-->
+          <!--            </template>-->
+          <!--            <template v-else-if="!online">Server offline — no positions available.</template>-->
+          <!--          </p>-->
         </div>
 
         <div

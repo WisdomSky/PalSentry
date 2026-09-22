@@ -52,8 +52,8 @@ The live world map displays all of your bases and their locations. It also shows
 
 ![Live World Map](screenshots/3-livemap.png)
 
-
 #### Tracking Mode
+
 The map also includes a special **Tracking Mode**, allowing you to focus on a specific player and automatically follow their movements in real time.
 
 The map keeps the selected player in view even when they travel long distances or teleport to another location.
@@ -90,6 +90,7 @@ Perform common server operations such as:
 
 Worldmap overview displays both palpagos islands and world tree maps side by side in the dashboard to keep track of all active players.
 ![Server Dashboard](screenshots/1.2-dashboard.png)
+
 ### Player Management
 
 The dashboard provides a quick overview of currently online players, while the dedicated **Players** page gives you access to both online and offline player records.

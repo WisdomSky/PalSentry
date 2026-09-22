@@ -202,13 +202,13 @@ function onTextureError(): void {
         </span>
       </div>
 
-<!--      <p-->
-<!--        v-if="pins.length === 0"-->
-<!--        class="pointer-events-none absolute inset-x-0 bottom-0 bg-slate-50/85 px-2 py-1 text-center text-[10px] text-slate-500 dark:bg-slate-900/85 dark:text-slate-400"-->
-<!--      >-->
-<!--        <template v-if="!online">Server offline — positions unavailable.</template>-->
-<!--        <template v-else>Nobody here right now.</template>-->
-<!--      </p>-->
+      <!--      <p-->
+      <!--        v-if="pins.length === 0"-->
+      <!--        class="pointer-events-none absolute inset-x-0 bottom-0 bg-slate-50/85 px-2 py-1 text-center text-[10px] text-slate-500 dark:bg-slate-900/85 dark:text-slate-400"-->
+      <!--      >-->
+      <!--        <template v-if="!online">Server offline — positions unavailable.</template>-->
+      <!--        <template v-else>Nobody here right now.</template>-->
+      <!--      </p>-->
     </div>
 
     <figcaption class="flex flex-wrap items-baseline justify-between gap-x-2 text-xs">
