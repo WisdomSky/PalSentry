@@ -4,10 +4,10 @@
 
 Monitor players, track activity on a live world map, manage your server, review historical performance metrics, and perform common administrative tasks — all from a single web interface.
 
-![Docker Image Version](https://img.shields.io/docker/v/wisdomsky/palsentry)
-![Docker Pulls](https://img.shields.io/docker/pulls/wisdomsky/palsentry)
-![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/wisdomsky/palsentry/docker-publish.yml)
-![GitHub License](https://img.shields.io/github/license/wisdomsky/palsentry)
+[![Docker Image Version](https://img.shields.io/docker/v/wisdomsky/palsentry)](https://hub.docker.com/r/wisdomsky/palsentry)
+[![Docker Pulls](https://img.shields.io/docker/pulls/wisdomsky/palsentry)](https://hub.docker.com/r/wisdomsky/palsentry)
+[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/wisdomsky/palsentry/docker-publish.yml)](https://github.com/WisdomSky/PalSentry/actions)
+[![GitHub License](https://img.shields.io/github/license/wisdomsky/palsentry)](https://github.com/WisdomSky/PalSentry/blob/main/LICENSE)
 
 ---
 

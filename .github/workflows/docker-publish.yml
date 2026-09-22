@@ -182,27 +182,79 @@ jobs:
           labels: |
             org.opencontainers.image.title=PalSentry
             org.opencontainers.image.description=Self-hosted dashboard for a Palworld dedicated server
-            org.opencontainers.image.licenses=AGPL-3.0-only
+            org.opencontainers.image.licenses=MIT
           annotations: |
             org.opencontainers.image.title=PalSentry
             org.opencontainers.image.description=Self-hosted dashboard for a Palworld dedicated server
-            org.opencontainers.image.licenses=AGPL-3.0-only
+            org.opencontainers.image.licenses=MIT
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
-      - name: Build and publish to both registries
+      - name: Separate immutable and named tags
+        id: publication_tags
+        shell: bash
+        env:
+          GENERATED_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          sha_tags=()
+          named_tags=()
+
+          while IFS= read -r tag; do
+            [[ -n "$tag" ]] || continue
+            case "${tag##*:}" in
+              sha-*) sha_tags+=("$tag") ;;
+              *) named_tags+=("$tag") ;;
+            esac
+          done <<< "$GENERATED_TAGS"
+
+          if ((${#sha_tags[@]} == 0)); then
+            echo 'docker/metadata-action did not generate a sha-* tag.' >&2
+            exit 1
+          fi
+
+          {
+            echo 'sha_tags<<TAGS'
+            printf '%s\n' "${sha_tags[@]}"
+            echo 'TAGS'
+            echo 'named_tags<<TAGS'
+            if ((${#named_tags[@]} > 0)); then
+              printf '%s\n' "${named_tags[@]}"
+            fi
+            echo 'TAGS'
+            if ((${#named_tags[@]} > 0)); then
+              echo 'has_named=true'
+            else
+              echo 'has_named=false'
+            fi
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and publish SHA tags first
         id: build
         uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ steps.publication_tags.outputs.sha_tags }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: mode=max
           sbom: true
+
+      - name: Publish latest and semantic-version tags after SHA tags
+        if: steps.publication_tags.outputs.has_named == 'true'
+        shell: bash
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          NAMED_TAGS: ${{ steps.publication_tags.outputs.named_tags }}
+        run: |
+          while IFS= read -r tag; do
+            [[ -n "$tag" ]] || continue
+            image="${tag%:*}"
+            echo "Publishing $tag from ${image}@${DIGEST}"
+            docker buildx imagetools create --tag "$tag" "${image}@${DIGEST}"
+          done <<< "$NAMED_TAGS"
 
       - name: Summarize published image
         run: |
