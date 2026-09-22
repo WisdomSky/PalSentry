@@ -1,4 +1,3 @@
-
 # Palsentry
 
 **Palsentry** is a modern monitoring and management dashboard for your [Palworld](https://www.palworldgame.com/) dedicated server.
@@ -68,16 +67,14 @@ services:
     image: wisdomsky/palsentry:latest
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - '3000:3000'
 
     environment:
-      PALSERVER_API_URL: "http://192.168.1.50:8212"
-      PALSERVER_ADMIN_PASSWORD: "your Palworld AdminPassword"
-      PALSENTRY_AUTH_USERNAME: "admin"
-      PALSENTRY_AUTH_PASSWORD: "your dashboard password"
-      PALSENTRY_SESSION_SECRET: "replace-with-a-random-secret-at-least-32-characters-long"
-
-
+      PALSERVER_API_URL: 'http://192.168.1.50:8212'
+      PALSERVER_ADMIN_PASSWORD: 'your Palworld AdminPassword'
+      PALSENTRY_AUTH_USERNAME: 'admin'
+      PALSENTRY_AUTH_PASSWORD: 'your dashboard password'
+      PALSENTRY_SESSION_SECRET: 'replace-with-a-random-secret-at-least-32-characters-long'
 ```
 
 Generate a secure session secret with:
@@ -116,32 +113,31 @@ http://localhost:3000
 docker run -d -p 3000:3000 -e PALSERVER_API_URL="http://192.168.1.50:8212" -e PALSERVER_ADMIN_PASSWORD="your Palworld AdminPassword" -e PALSENTRY_AUTH_USERNAME="admin" -e PALSENTRY_AUTH_PASSWORD="your dashboard password" -e PALSENTRY_SESSION_SECRET="replace-with-a-random-secret-at-least-32-characters-long" wisdomsky/palsentry:latest
 ```
 
-
 ## Environment Variables
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `PALSERVER_API_URL` | **Required** | Palworld REST API host and port |
-| `PALSERVER_ADMIN_PASSWORD` | **Required** | Palworld `AdminPassword` |
-| `PALSERVER_REST_USERNAME` | `admin` | HTTP Basic Authentication username used by the Palworld REST API |
-| `PALSENTRY_AUTH_USERNAME` | `admin` | Palsentry dashboard login username |
-| `PALSENTRY_AUTH_PASSWORD` | **One required** | Plaintext dashboard password |
-| `PALSENTRY_AUTH_PASSWORD_HASH` | **One required** | Generated scrypt password hash; takes precedence over `PALSENTRY_AUTH_PASSWORD` |
-| `PALSENTRY_SESSION_SECRET` | **Required** | Cookie-signing secret; must be at least 32 characters |
-| `PALSENTRY_SESSION_TTL_HOURS` | `12` | Dashboard session lifetime in hours |
-| `PALSERVER_TIMEOUT_MS` | `10000` | Palworld REST API request timeout in milliseconds |
-| `PALSENTRY_ALLOW_DESTRUCTIVE` | `false` | Enables kick, ban, unban, shutdown, stop, and restart operations |
-| `PALSENTRY_TRUST_PROXY` | `false` | Trust proxy IP headers and use Secure cookies |
-| `PALSENTRY_SAMPLE_INTERVAL_SECONDS` | `60` | Metrics and player-roster sampling interval (`5`–`3600`) |
-| `PALSENTRY_HISTORY_RETENTION_DAYS` | `30` | Number of days historical metrics are retained (`1`–`3650`) |
-| `PALSENTRY_RESTART_WAIT_SECONDS` | `30` | Default player-warning countdown before a restart |
-| `PALSENTRY_RESTART_HEALTH_TIMEOUT_SECONDS` | `180` | Maximum time to wait for the server to become healthy after a restart |
-| `PALSENTRY_RESTART_POLL_INTERVAL_MS` | `2000` | Health-check interval while waiting for the server to return |
-| `PALSENTRY_MAP_PROJECTION` | `new` | Map projection mode: `none`, `new` for Palworld 1.0+, or `legacy` |
-| `PALSENTRY_BIND_ADDRESS` | `127.0.0.1` | Host address published by Docker Compose |
-| `PALSENTRY_HOST_PORT` | `3000` | Host port published by Docker Compose |
-| `PALSENTRY_IMAGE` | `wisdomsky/palsentry:latest` | Docker Compose image override |
-| `LOG_LEVEL` | `info` | Logging level: `fatal`, `error`, `warn`, `info`, `debug`, `trace`, or `silent` |
+| Variable                                   | Default                      | Description                                                                     |
+| ------------------------------------------ | ---------------------------- | ------------------------------------------------------------------------------- |
+| `PALSERVER_API_URL`                        | **Required**                 | Palworld REST API host and port                                                 |
+| `PALSERVER_ADMIN_PASSWORD`                 | **Required**                 | Palworld `AdminPassword`                                                        |
+| `PALSERVER_REST_USERNAME`                  | `admin`                      | HTTP Basic Authentication username used by the Palworld REST API                |
+| `PALSENTRY_AUTH_USERNAME`                  | `admin`                      | Palsentry dashboard login username                                              |
+| `PALSENTRY_AUTH_PASSWORD`                  | **One required**             | Plaintext dashboard password                                                    |
+| `PALSENTRY_AUTH_PASSWORD_HASH`             | **One required**             | Generated scrypt password hash; takes precedence over `PALSENTRY_AUTH_PASSWORD` |
+| `PALSENTRY_SESSION_SECRET`                 | **Required**                 | Cookie-signing secret; must be at least 32 characters                           |
+| `PALSENTRY_SESSION_TTL_HOURS`              | `12`                         | Dashboard session lifetime in hours                                             |
+| `PALSERVER_TIMEOUT_MS`                     | `10000`                      | Palworld REST API request timeout in milliseconds                               |
+| `PALSENTRY_ALLOW_DESTRUCTIVE`              | `false`                      | Enables kick, ban, unban, shutdown, stop, and restart operations                |
+| `PALSENTRY_TRUST_PROXY`                    | `false`                      | Trust proxy IP headers and use Secure cookies                                   |
+| `PALSENTRY_SAMPLE_INTERVAL_SECONDS`        | `60`                         | Metrics and player-roster sampling interval (`5`–`3600`)                        |
+| `PALSENTRY_HISTORY_RETENTION_DAYS`         | `30`                         | Number of days historical metrics are retained (`1`–`3650`)                     |
+| `PALSENTRY_RESTART_WAIT_SECONDS`           | `30`                         | Default player-warning countdown before a restart                               |
+| `PALSENTRY_RESTART_HEALTH_TIMEOUT_SECONDS` | `180`                        | Maximum time to wait for the server to become healthy after a restart           |
+| `PALSENTRY_RESTART_POLL_INTERVAL_MS`       | `2000`                       | Health-check interval while waiting for the server to return                    |
+| `PALSENTRY_MAP_PROJECTION`                 | `new`                        | Map projection mode: `none`, `new` for Palworld 1.0+, or `legacy`               |
+| `PALSENTRY_BIND_ADDRESS`                   | `127.0.0.1`                  | Host address published by Docker Compose                                        |
+| `PALSENTRY_HOST_PORT`                      | `3000`                       | Host port published by Docker Compose                                           |
+| `PALSENTRY_IMAGE`                          | `wisdomsky/palsentry:latest` | Docker Compose image override                                                   |
+| `LOG_LEVEL`                                | `info`                       | Logging level: `fatal`, `error`, `warn`, `info`, `debug`, `trace`, or `silent`  |
 
 ## Security
 
@@ -170,23 +166,20 @@ services:
     image: wisdomsky/palsentry:latest
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - '3000:3000'
 
     environment:
-      PALSERVER_API_URL: "http://192.168.1.50:8212"
-      PALSERVER_ADMIN_PASSWORD: "your Palworld AdminPassword"
-      PALSENTRY_AUTH_USERNAME: "admin"
-      PALSENTRY_AUTH_PASSWORD: "your dashboard password"
-      PALSENTRY_SESSION_SECRET: "replace-with-a-random-secret-at-least-32-characters-long"
+      PALSERVER_API_URL: 'http://192.168.1.50:8212'
+      PALSERVER_ADMIN_PASSWORD: 'your Palworld AdminPassword'
+      PALSENTRY_AUTH_USERNAME: 'admin'
+      PALSENTRY_AUTH_PASSWORD: 'your dashboard password'
+      PALSENTRY_SESSION_SECRET: 'replace-with-a-random-secret-at-least-32-characters-long'
 
     volumes:
       - ./data:/data
-
 ```
 
 This allows historical metrics, player information, and other persistent data to survive container upgrades and recreation.
-
-
 
 ## Updating
 
