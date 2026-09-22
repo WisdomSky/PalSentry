@@ -66,4 +66,6 @@ console.log(`\nAdd this line to your .env:\n`);
 // Single quotes are important: Docker Compose otherwise treats `$salt` / `$hash` as variable
 // interpolation when the generated line is pasted into .env.
 console.log(`PALSENTRY_LOGIN_PASSWORD_HASH='${hashPassword(password)}'\n`);
-console.log('Then remove PALSENTRY_LOGIN_PASSWORD so the plaintext password is not kept on disk.\n');
+console.log(
+  'Then remove PALSENTRY_LOGIN_PASSWORD so the plaintext password is not kept on disk.\n',
+);
