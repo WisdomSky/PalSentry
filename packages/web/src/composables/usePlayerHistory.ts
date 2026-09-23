@@ -8,9 +8,9 @@ export type UsePlayerHistoryResult = UseHistoryResourceResult<PlayerHistoryRespo
 /**
  * Recorded player movement for the wayback map.
  *
- * The whole selected range arrives in one response — snapshots and a downsampled trail per player
- * — so scrubbing the timeline afterwards is purely client-side. Moving a pointer across a map must
- * never become a stream of requests to the PalSentry server, let alone to the game server.
+ * The whole selected range arrives in one response — snapshots and each player's downsampled
+ * positions — so scrubbing the timeline afterwards is purely client-side. Moving a pointer across a
+ * map must never become a stream of requests to the PalSentry server, let alone to the game server.
  */
 export function usePlayerHistory(
   selection: Ref<HistorySelection>,

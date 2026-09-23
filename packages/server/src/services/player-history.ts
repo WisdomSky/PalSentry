@@ -77,12 +77,6 @@ interface SnapshotRow {
   playerCount: number;
 }
 
-interface BaselineRow {
-  ts: number;
-  x: number;
-  y: number;
-}
-
 export class PlayerHistoryService {
   private readonly db: Db;
   private readonly players: PlayerService;
@@ -444,17 +438,6 @@ export class PlayerHistoryService {
       else points.push(point);
     }
 
-    // Latest point strictly before the range, per player. Indexed per-account lookups rather than
-    // one aggregate scan: the roster is small, while the history below `from` can be huge.
-    const findBaseline = this.db.prepare(
-      `SELECT captured_at AS ts, location_x AS x, location_y AS y
-         FROM player_positions
-        WHERE userid = ?
-          AND captured_at < ?
-        ORDER BY captured_at DESC
-        LIMIT 1`,
-    );
-
     const players: WaybackPlayerHistory[] = [];
     const known = new Set<string>();
     for (const entry of this.players.list()) {
@@ -462,21 +445,12 @@ export class PlayerHistoryService {
 
       known.add(entry.userId);
       const points = pointsByUser.get(entry.userId) ?? [];
-      const baselineRow = findBaseline.get(entry.userId, from) as BaselineRow | undefined;
 
-      // A roster account with nothing recorded anywhere would be a marker with no position, so
-      // it is left out entirely; the live Players tab is where accounts are enumerated.
-      if (points.length === 0 && baselineRow === undefined) continue;
+      // A roster account with nothing recorded in the range cannot be drawn at any instant in it,
+      // so it is left out entirely; the live Players tab is where accounts are enumerated.
+      if (points.length === 0) continue;
 
-      players.push({
-        userId: entry.userId,
-        name: entry.name,
-        baseline:
-          baselineRow === undefined
-            ? null
-            : { ts: baselineRow.ts, x: baselineRow.x, y: baselineRow.y },
-        points,
-      });
+      players.push({ userId: entry.userId, name: entry.name, points });
     }
 
     // Positions are only ever written for accounts the roster already knows, so a recorded

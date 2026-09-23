@@ -1,67 +1,36 @@
-import {
-  mapLayerForPoint,
-  type MapLayerId,
-  type WaybackPlayerHistory,
-  type WaybackPoint,
-} from '@palsentry/shared';
+import type { WaybackPlayerHistory } from '@palsentry/shared';
 
 /**
  * Turning recorded positions into something the map can draw.
  *
- * The server answers with raw world coordinates; a trail is a *drawing* decision — where a line is
- * allowed to exist at all — so it is made here, once, rather than inside the map component while
- * it renders.
+ * The server answers with raw world coordinates; deciding which of them belong on the map at one
+ * instant is a *drawing* decision, so it is made here, once, rather than inside the map component
+ * while it renders.
  */
 
 /** A world position, ready to be projected onto a map layer. */
-export interface TrailPoint {
+export interface WorldPosition {
   x: number;
   y: number;
 }
 
-/**
- * A run of consecutive observations that can safely be joined by a line.
- *
- * A trail is a set of segments rather than one path because anything else would draw movement that
- * never happened: a player who logged off, teleported, or crossed into the other region was not
- * walking between those two points.
- */
-export interface WaybackTrailSegment {
-  /** The region every point in the segment belongs to. */
-  layer: MapLayerId;
-  points: TrailPoint[];
-}
-
 /** One player as the historical map sees them, at one instant. */
-export interface WaybackPlayerScene {
+export interface WaybackMarker {
   userId: string;
   name: string;
-  /** True when this account appears in the observation at the effective instant. */
-  online: boolean;
-  /** Latest recorded position at or before the effective instant, when there is one. */
-  position: TrailPoint | null;
-  /** Epoch seconds of {@link position}. */
-  lastSeenTs: number | null;
-  /** Movement up to the effective instant, split wherever the record is not contiguous. */
-  trail: WaybackTrailSegment[];
-  /**
-   * True when the only thing known about this player is a sighting before the range began.
-   *
-   * They were somewhere, but nothing was recorded inside the window being viewed, which is worth
-   * distinguishing from a player who moved within it.
-   */
-  fromBaseline: boolean;
-  /** Stable per-account colour, so a trail can be followed across a whole replay. */
+  /** The position recorded at the shown instant. */
+  position: WorldPosition;
+  /** Stable per-account colour, so a dot can be followed across a whole replay. */
   colour: string;
 }
 
 /**
- * Distinguishable hues for player trails.
+ * Distinguishable hues for player dots.
  *
  * Fixed rather than generated: two accounts that happen to hash nearby must still be tellable
  * apart, and the palette is small enough that a glance memorises it.
  */
-const TRAIL_PALETTE: readonly string[] = [
+const PLAYER_PALETTE: readonly string[] = [
   '#0ea5e9',
   '#8b5cf6',
   '#f97316',
@@ -77,102 +46,43 @@ const TRAIL_PALETTE: readonly string[] = [
 ];
 
 /** A colour for an account, stable across reloads since it depends only on the id. */
-export function trailColour(userId: string): string {
+export function playerColour(userId: string): string {
   let hash = 0;
   for (let index = 0; index < userId.length; index += 1) {
     hash = (hash * 31 + userId.charCodeAt(index)) | 0;
   }
-  return TRAIL_PALETTE[Math.abs(hash) % TRAIL_PALETTE.length] ?? TRAIL_PALETTE[0]!;
+  return PLAYER_PALETTE[Math.abs(hash) % PLAYER_PALETTE.length] ?? PLAYER_PALETTE[0]!;
 }
 
 /**
- * How long a break in the record has to be before a trail is cut.
+ * The players recorded at one instant, and where they were.
  *
- * Two buckets, not one: downsampling keeps the last observation in each bucket, so consecutive
- * buckets are normally about one bucket apart, while a genuinely missed observation leaves two.
- */
-function gapThresholdSeconds(bucketSeconds: number): number {
-  return Math.max(2, bucketSeconds * 2);
-}
-
-/**
- * Build the drawable scene for one instant.
+ * Only accounts present in that exact observation are returned. PalSentry knows where a player was
+ * when it observed them and nowhere else, so drawing the last known position of somebody who has
+ * since logged off would fill the replay with ghosts who were not there — the map would answer
+ * "who has ever been seen?" instead of "who was online then?".
  *
- * Returns an empty scene when there is no instant to show, which is the honest answer for a range
- * with no successful observations in it.
+ * Snapshots and per-player points are downsampled with the same buckets and the same anchor, so an
+ * equal timestamp means the player was in that observation rather than merely near it.
  */
-export function buildWaybackScene(
+export function waybackMarkersAt(
   players: readonly WaybackPlayerHistory[],
-  effectiveTs: number | null,
-  bucketSeconds: number,
-): WaybackPlayerScene[] {
-  if (effectiveTs === null) return [];
+  ts: number | null,
+): WaybackMarker[] {
+  if (ts === null) return [];
 
-  const gap = gapThresholdSeconds(bucketSeconds);
-  const scene: WaybackPlayerScene[] = [];
-
+  const markers: WaybackMarker[] = [];
   for (const player of players) {
-    // The baseline belongs to the trail: it is where the player was when the range opened, so it
-    // is also the anchor a player who never moved inside the range is shown at.
-    const observed: WaybackPoint[] = [];
-    if (player.baseline !== null && player.baseline.ts <= effectiveTs) {
-      observed.push(player.baseline);
-    }
-    for (const point of player.points) {
-      if (point.ts <= effectiveTs) observed.push(point);
-    }
+    const point = player.points.find((candidate) => candidate.ts === ts);
+    if (point === undefined) continue;
 
-    // Nothing was recorded for this account at or before the shown instant. It has no position to
-    // draw and no sighting to report, so it is not part of this moment at all — listing it would
-    // add a row of dashes that says only "not yet".
-    if (observed.length === 0) continue;
-
-    const trail: WaybackTrailSegment[] = [];
-    let current: WaybackTrailSegment | null = null;
-    let previousTs: number | null = null;
-    let previousLayer: MapLayerId | null = null;
-
-    for (const point of observed) {
-      const layer = mapLayerForPoint(point);
-      if (layer === null) {
-        // A position outside every known region cannot be projected, and whatever comes next is
-        // not continuous with what came before it.
-        current = null;
-        previousTs = null;
-        previousLayer = null;
-        continue;
-      }
-
-      const continuous =
-        current !== null &&
-        previousTs !== null &&
-        previousLayer === layer &&
-        point.ts - previousTs <= gap;
-
-      if (!continuous) {
-        current = { layer, points: [] };
-        trail.push(current);
-      }
-
-      current!.points.push({ x: point.x, y: point.y });
-      previousTs = point.ts;
-      previousLayer = layer;
-    }
-
-    const latest = observed.at(-1) ?? null;
-    const online = player.points.some((point) => point.ts === effectiveTs);
-
-    scene.push({
+    markers.push({
       userId: player.userId,
       name: player.name,
-      online,
-      position: latest === null ? null : { x: latest.x, y: latest.y },
-      lastSeenTs: latest?.ts ?? null,
-      trail,
-      fromBaseline: player.points.length === 0 && player.baseline !== null,
-      colour: trailColour(player.userId),
+      position: { x: point.x, y: point.y },
+      colour: playerColour(player.userId),
     });
   }
 
-  return scene;
+  return markers;
 }

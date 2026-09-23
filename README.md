@@ -79,7 +79,7 @@ The map keeps the selected player in view even when they travel long distances o
 
 #### Wayback Mode
 
-PalSentry records where players are as it runs, so the map can be replayed instead of only showing the present. The **Wayback map** button on the Players tab opens the last 24 hours with every player PalSentry has seen — including the ones who logged off hours ago.
+PalSentry records where players are as it runs, so the map can be replayed instead of only showing the present. The **Wayback map** button on the World map opens the last 24 hours: scrub the timeline and each dot moves to the position recorded for that moment, showing only the players who were online in it.
 
 ![Wayback Mode](screenshots/3.3-livemap-replay.png)
 
