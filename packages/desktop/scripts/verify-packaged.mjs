@@ -28,7 +28,7 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
-import { mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import net from 'node:net';
@@ -406,15 +406,35 @@ async function startMockPalworld() {
 }
 
 /** Serve a `release/` directory as a generic electron-updater feed. */
+/**
+ * Read a file from the feed directory.
+ *
+ * electron-builder writes an artifact's name with spaces but the update metadata's url with dashes, so
+ * Windows asks for "PalSentry-Setup-1.0.1.exe" while the file on disk is "PalSentry Setup 1.0.1.exe".
+ * The exact name wins; otherwise names are matched with dashes and spaces treated alike.
+ */
+async function readFeedFile(directory, name) {
+  try {
+    return await readFile(path.join(directory, name));
+  } catch {
+    // Fall through to the normalised lookup.
+  }
+
+  const wanted = name.replace(/-/g, ' ');
+  for (const entry of await readdir(directory).catch(() => [])) {
+    if (entry.replace(/-/g, ' ') === wanted) return await readFile(path.join(directory, entry));
+  }
+
+  return null;
+}
+
 async function startFeedServer(directory) {
   const port = await freePort();
   const server = createServer(async (request, response) => {
     const name = path.basename(new URL(request.url ?? '/', 'http://localhost').pathname);
 
-    let body;
-    try {
-      body = await readFile(path.join(directory, name));
-    } catch {
+    const body = await readFeedFile(directory, name);
+    if (body === null) {
       response.writeHead(404).end('not found');
       return;
     }
@@ -549,6 +569,19 @@ if (feed !== null && updateFeed !== null) {
   );
   const rangedBody = Buffer.from(await ranged.arrayBuffer());
   assert(rangedBody.length === 100, `a 100-byte range returned ${rangedBody.length} bytes`);
+
+  // The artifact is named with spaces on disk but with dashes in the metadata's url, so prove the
+  // dashed form is served too — only Windows exercises that for real, and it does it 10 minutes in.
+  if (updateFeed.payload !== null) {
+    const dashed = updateFeed.payload.replace(/ /g, '-');
+    const artifact = await fetch(`${feed.url}/${encodeURIComponent(dashed)}`, {
+      headers: { range: 'bytes=0-0' },
+    });
+    assert(
+      artifact.status === 200 || artifact.status === 206,
+      `the update feed does not serve ${dashed} (${artifact.status})`,
+    );
+  }
 }
 
 console.log(`verifying ${appPath}`);
@@ -789,12 +822,22 @@ try {
   await check('renders the dashboard with live players', async () => {
     await cdp(rendererPort, '', { method: 'Page.navigate', params: { url: `${origin}/` } });
 
-    const text = await waitFor('dashboard', async () => {
+    // Wait for the heading rather than for a player's name: the page the previous check left behind
+    // can still be on screen when the poll starts, and a name is not proof the dashboard rendered.
+    const text = await waitFor('the dashboard', async () => {
       const body = await rendererEval(rendererPort, 'document.body.innerText').catch(() => '');
-      return body.includes('Alice') ? body : null;
+      return body.includes('Dashboard') ? body : null;
+    }).catch(async (error) => {
+      const where = await rendererEval(rendererPort, 'location.pathname + location.search').catch(
+        () => '?',
+      );
+      const body = await rendererEval(rendererPort, 'document.body.innerText').catch(() => '');
+      throw new Error(
+        `${error?.message ?? String(error)} (at ${where}, body: ${body.replace(/\s+/g, ' ').slice(0, 200)})`,
+      );
     });
 
-    assert(text.includes('Dashboard'), 'the dashboard heading is missing');
+    assert(text.includes('Alice'), 'the dashboard does not list the online players');
 
     return 'dashboard shows the connected server’s players';
   });
