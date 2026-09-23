@@ -26,6 +26,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -393,11 +394,25 @@ async function feedVersion(directory) {
     const file = path.join(directory, candidate);
     if (!existsSync(file)) continue;
 
-    const version = (await readFile(file, 'utf8')).match(/^version:\s*(.+)$/m)?.[1]?.trim();
-    if (version) return { version, file: candidate };
+    const contents = await readFile(file, 'utf8');
+    const version = contents.match(/^version:\s*(.+)$/m)?.[1]?.trim();
+    if (version) {
+      return {
+        version,
+        file: candidate,
+        payload: contents.match(/^path:\s*(.+)$/m)?.[1]?.trim() ?? null,
+      };
+    }
   }
 
   throw new Error(`no latest*.yml with a version in ${directory}`);
+}
+
+/** sha512 of a file, so a replaced AppImage can be told apart from the one we launched. */
+async function digestFile(file) {
+  return createHash('sha512')
+    .update(await readFile(file))
+    .digest('hex');
 }
 
 // ---------------------------------------------------------------------------
@@ -733,7 +748,16 @@ try {
   } else if (process.platform === 'darwin') {
     record('installs an N → N+1 update', true, 'skipped: unsigned macOS builds do not update');
   } else {
-    await check(`installs the ${updateTo} update and restarts`, async () => {
+    // The AppImage updater installs by moving the downloaded file over the running AppImage, then
+    // re-runs it with an empty argv (`spawnLog(destination, [], env)`), so the relaunch cannot carry
+    // the --no-sandbox a headless runner needs to start Chromium and dies before it logs anything.
+    // Linux therefore asserts the install — the file at that path must become the bytes the feed
+    // served — and leaves the relaunch to Windows, where the platform needs no such switch.
+    const updateCheckName =
+      process.platform === 'linux'
+        ? `installs the ${updateTo} update in place`
+        : `installs the ${updateTo} update and restarts`;
+    await check(updateCheckName, async () => {
       // "Restart to update" in the menu is what the user actually sees, and the ready text is logged
       // as a structured field that a message-only reader would miss — so accept either signal.
       const menuFinder = `const { Menu } = req('electron');
@@ -791,6 +815,22 @@ try {
          item.click();
          return 'clicked';`,
       );
+
+      if (process.platform === 'linux') {
+        assert(updateFeed.payload !== null, 'the update feed does not name the artifact it serves');
+
+        const served = await digestFile(path.join(feedDir, updateFeed.payload));
+        const replaced = await waitFor(
+          'the AppImage to be replaced',
+          async () => (await digestFile(appPath)) === served,
+          { timeoutMs: 30_000, intervalMs: 1_000 },
+        )
+          .then(() => true)
+          .catch(() => false);
+
+        assert(replaced, 'the AppImage was not replaced by the downloaded update');
+        return `installed ${updateTo} in place (the AppImage relaunch is not asserted here)`;
+      }
 
       // The installer replaces the app and starts it again; the relaunch writes to its own log, and
       // on Windows that is the installed data directory rather than the temporary one.

@@ -382,7 +382,7 @@ server, the served SPA, the first-run connection screen, the SQLite schema (whic
 addon loaded), the tray, external-window isolation, connecting to a mock Palworld server and
 recording, the dashboard rendering live players, recording continuing after the window is closed, and
 a clean shutdown. With `--feed-dir` it also serves a newer build as an update feed and asserts that the
-app downloads it, installs it and restarts into it.
+app downloads it, offers "Restart to update", installs it and restarts into it.
 
 ```sh
 npm run verify:desktop
@@ -395,7 +395,12 @@ on every pull request, manual run and tag, across all four target configurations
 (`macos-14`), macOS x64 (`macos-15-intel`, GitHub's x86_64 image, so nothing runs under Rosetta),
 Windows x64 and Linux x64. Windows and Linux additionally build a throwaway newer version and perform
 the real N → N+1 update, so the installer handoff is exercised rather than assumed. macOS skips that
-step because unsigned builds cannot install updates.
+step because unsigned builds cannot install updates, and Linux asserts it only up to the install: the
+AppImage is proved to be replaced by the bytes the feed served, but not to relaunch, because
+electron-updater starts the new AppImage with an empty argument list (`spawnLog(destination, [], env)`)
+and so cannot pass the `--no-sandbox` a headless runner needs — the relaunch dies before it can write a
+log. Windows has no such restriction, so the full download → install → relaunch cycle is asserted
+there.
 
 ## Publishing containers (maintainers)
 
