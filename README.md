@@ -50,9 +50,9 @@ your platform and open it — every release is also listed on
 
 <!-- downloads:start -->
 
-[![Windows](https://img.shields.io/badge/Windows-PalSentry--Setup--1.2.0.exe-0078D6?logo=windows&logoColor=white)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.0/PalSentry-Setup-1.2.0.exe)
-[![macOS](https://img.shields.io/badge/macOS-PalSentry--1.2.0--arm64.dmg-000000?logo=apple&logoColor=white)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.0/PalSentry-1.2.0-arm64.dmg)
-[![Linux](https://img.shields.io/badge/Linux-PalSentry--1.2.0.AppImage-FCC624?logo=linux&logoColor=black)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.0/PalSentry-1.2.0.AppImage)
+[![Windows](https://img.shields.io/badge/Windows-PalSentry--Setup--1.2.1.exe-0078D6?logo=windows&logoColor=white)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.1/PalSentry-Setup-1.2.1.exe)
+[![macOS](https://img.shields.io/badge/macOS-PalSentry--1.2.1--arm64.dmg-000000?logo=apple&logoColor=white)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.1/PalSentry-1.2.1-arm64.dmg)
+[![Linux](https://img.shields.io/badge/Linux-PalSentry--1.2.1.AppImage-FCC624?logo=linux&logoColor=black)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.1/PalSentry-1.2.1.AppImage)
 
 <!-- downloads:end -->
 
