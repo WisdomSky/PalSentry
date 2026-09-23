@@ -57,8 +57,9 @@ jobs:
 
       # The app reports two versions: `app.getVersion()` (from the desktop package, which also names
       # the release tag and therefore the update feed) and `APP_VERSION` (served by the API and shown
-      # in the UI). They are written in different files, so they drift silently — and a drifted
-      # release tag is an update nobody can install.
+      # in the UI). Every workspace manifest carries a copy too. They are written in different files,
+      # so they drift silently — and a drifted release tag is an update nobody can install.
+      # `npm run version:bump -- <version>` moves them all together.
       - name: Check the tag and the packaged versions agree
         env:
           TAG: ${{ github.ref_name }}
@@ -67,20 +68,33 @@ jobs:
           node --input-type=module <<'NODE'
           import { readFileSync } from 'node:fs';
 
-          const desktop = JSON.parse(readFileSync('packages/desktop/package.json', 'utf8')).version;
-          const server = readFileSync('packages/server/src/version.ts', 'utf8').match(
-            /APP_VERSION\s*=\s*'([^']+)'/,
-          )?.[1];
-          const root = JSON.parse(readFileSync('package.json', 'utf8')).version;
+          const workspaces = JSON.parse(readFileSync('package.json', 'utf8')).workspaces ?? [];
+          const manifestVersion = (file) => JSON.parse(readFileSync(file, 'utf8')).version;
 
-          const found = { desktop, server, root };
+          // The desktop version is the one the release tag and the update feed use, so it is the
+          // value every other surface has to match.
+          const desktop = manifestVersion('packages/desktop/package.json');
+          const found = {
+            'package.json': manifestVersion('package.json'),
+            'packages/server/src/version.ts': readFileSync(
+              'packages/server/src/version.ts',
+              'utf8',
+            ).match(/APP_VERSION\s*=\s*'([^']+)'/)?.[1],
+            ...Object.fromEntries(
+              workspaces.map((dir) => [
+                `${dir}/package.json`,
+                manifestVersion(`${dir}/package.json`),
+              ]),
+            ),
+          };
+
           console.log('versions:', found);
 
           const mismatched = Object.entries(found).filter(([, value]) => value !== desktop);
           if (mismatched.length > 0) {
-            for (const [where, value] of mismatched) {
+            for (const [file, value] of mismatched) {
               console.error(
-                `::error::packages/${where} reports ${value} but the desktop app is ${desktop}; bump them together.`,
+                `::error::${file} reports ${value} but the desktop app is ${desktop}; run npm run version:bump -- ${desktop} to bring them together.`,
               );
             }
             process.exit(1);

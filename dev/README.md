@@ -420,11 +420,13 @@ No separate GHCR token is needed. Publishing with `GITHUB_TOKEN` links the packa
 
 Desktop releases are cut from the same tags as the container images:
 
-1. Bump the version in `packages/desktop/package.json`, `packages/server/src/version.ts` and the root
-   `package.json` together. The workflow's first job fails when they disagree, and on a tag it also
-   requires the tag to equal `v<version>`. The desktop version names the release, so a mismatch would
-   publish an update that no installed app can ever see.
-2. Push the tag: `git tag v1.2.3 && git push origin v1.2.3`.
+1. Bump every file that states the version — the five `package.json` files,
+   `packages/server/src/version.ts`, the lockfile and the README's download buttons — with one
+   command: `npm run version:bump -- 1.3.0`. `npm run version:bump -- --check` reports drift without
+   writing, if you just want to know where things stand. The workflow's first job fails when they
+   disagree, and on a tag it also requires the tag to equal `v<version>`. The desktop version names
+   the release, so a mismatch would publish an update that no installed app can ever see.
+2. Push the tag: `git tag v1.3.0 && git push origin v1.3.0`.
 
 [`.github/workflows/desktop-release.yml`](.github/workflows/desktop-release.yml) then builds macOS
 arm64 and x64 (dmg and zip), Windows x64 (NSIS) and Linux x64 (AppImage and deb) on native runners.
