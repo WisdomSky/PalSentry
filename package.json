@@ -1,6 +1,6 @@
 {
   "name": "palsentry",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "private": true,
   "description": "Web dashboard for managing a Palworld dedicated server through its official REST API",
   "type": "module",
@@ -31,7 +31,8 @@
     "format": "prettier --write .",
     "hash-password": "node packages/server/scripts/hash-password.mjs",
     "mock": "node packages/server/scripts/mock-palworld.mjs",
-    "test:smoke": "node packages/server/scripts/smoke-test.mjs"
+    "test:smoke": "node packages/server/scripts/smoke-test.mjs",
+    "version:bump": "node scripts/bump-version.mjs"
   },
   "devDependencies": {
     "concurrently": "^10.0.5",

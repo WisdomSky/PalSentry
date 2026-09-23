@@ -45,7 +45,16 @@ http://localhost:3000
 ### Desktop app
 
 PalSentry is also available as a desktop app for macOS, Windows and Linux. Download the installer for
-your platform from [GitHub Releases](https://github.com/WisdomSky/PalSentry/releases) and open it.
+your platform and open it — every release is also listed on
+[GitHub Releases](https://github.com/WisdomSky/PalSentry/releases).
+
+<!-- downloads:start -->
+
+[![Windows](https://img.shields.io/badge/Windows-PalSentry--Setup--1.2.0.exe-0078D6?logo=windows&logoColor=white)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.0/PalSentry-Setup-1.2.0.exe)
+[![macOS](https://img.shields.io/badge/macOS-PalSentry--1.2.0--arm64.dmg-000000?logo=apple&logoColor=white)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.0/PalSentry-1.2.0-arm64.dmg)
+[![Linux](https://img.shields.io/badge/Linux-PalSentry--1.2.0.AppImage-FCC624?logo=linux&logoColor=black)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.0/PalSentry-1.2.0.AppImage)
+
+<!-- downloads:end -->
 
 > [!NOTE]
 > macOS builds are unsigned, so Gatekeeper blocks the first launch: open **System Settings → Privacy
