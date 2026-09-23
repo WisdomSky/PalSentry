@@ -362,23 +362,22 @@ describe('PlayerHistoryService history', () => {
     );
   });
 
-  it('includes the last known position from before the range', async () => {
+  it('does not report a player with no observation in the range', async () => {
     const testApp = await newApp();
     const { ctx } = testApp;
 
-    // Dave left two hours before the window opens and never came back.
+    // Dave left two hours before the window opens and never came back, so there is no instant inside
+    // the range at which he can honestly be drawn.
     observeAt(ctx, BASE, -7_200, [player('USER-DAVE', 'Dave', 7, 7)]);
     observeAt(ctx, BASE, 0, [player('USER-A', 'Alice', 1, 1)]);
 
     const history = ctx.playerHistory.history('1h', NOW_MS);
 
-    const dave = history.players.find((entry) => entry.userId === 'USER-DAVE');
-    assert.ok(dave !== undefined, 'a player with no points in range is still reported');
-    assert.deepEqual(dave.baseline, { ts: BASE - 7_200, x: 7, y: 7 });
-    assert.deepEqual(dave.points, []);
-
-    const alice = history.players.find((entry) => entry.userId === 'USER-A');
-    assert.equal(alice?.baseline, null, 'nothing was recorded before the range for Alice');
+    assert.deepEqual(
+      history.players.map((entry) => entry.userId),
+      ['USER-A'],
+      'only the account recorded inside the range is reported',
+    );
   });
 
   it('never reports a player the roster does not know', async () => {
@@ -402,7 +401,7 @@ describe('PlayerHistoryService history', () => {
     assert.deepEqual(history.players, [], 'but an unnameable account is not drawn');
   });
 
-  it('uses pre-upgrade positions without presenting them as timeline ticks', async () => {
+  it('keeps pre-upgrade positions out of the timeline entirely', async () => {
     const testApp = await newApp();
     const { ctx } = testApp;
 
@@ -423,9 +422,9 @@ describe('PlayerHistoryService history', () => {
 
     assert.deepEqual(history.snapshots, [], 'a synthesised row was never observed by this service');
     assert.deepEqual(
-      history.players.find((entry) => entry.userId === 'USER-DAVE')?.baseline,
-      { ts: BASE - 7_200, x: 8, y: 9 },
-      'but it is still usable history',
+      history.players,
+      [],
+      'and it cannot place a player at an instant the timeline can land on',
     );
   });
 

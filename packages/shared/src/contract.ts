@@ -447,21 +447,15 @@ export interface WaybackPoint {
  * One player's movement inside the requested range.
  *
  * `points` is downsampled to the response's `bucketSeconds`, so a 5-second cadence over a month
- * cannot ship hundreds of thousands of rows. A player who was online in a bucket has exactly one
- * point anchored at that bucket's `ts`, which is what lets the UI answer "were they online at
- * the selected instant?" without a second request.
+ * cannot ship hundreds of thousands of rows: each bucket keeps the player's last observation in it.
+ * Snapshots are downsampled the same way, so the two agree exactly — a point whose `ts` matches a
+ * snapshot's `ts` *is* that observation, which is how the UI answers "were they online at this
+ * instant?" without a second request.
  */
 export interface WaybackPlayerHistory {
   userId: string;
   /** The roster's current name for the account; the points carry no identity of their own. */
   name: string;
-  /**
-   * The last recorded point strictly before `from`, or null when the player has none.
-   *
-   * Without this, a player who logged off before the selected range would be invisible — which
-   * is the opposite of what a wayback view is for.
-   */
-  baseline: WaybackPoint | null;
   points: WaybackPoint[];
 }
 

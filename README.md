@@ -13,13 +13,38 @@ Monitor players, track activity on a live world map, manage your server, review 
 
 ## Installation
 
-### Docker Run
 
+### Desktop app
+
+PalSentry is available as a desktop app for macOS, Windows and Linux. Download the installer for
+your platform and open it — every release is also listed on
+[GitHub Releases](https://github.com/WisdomSky/PalSentry/releases).
+
+[![Windows](images/download-windows.png)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.1/PalSentry-Setup-1.2.1.exe) [![macOS](images/download-macos.png)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.1/PalSentry-1.2.1-arm64.dmg) [![Linux](images/download-linux.png)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.1/PalSentry-1.2.1.AppImage)
+
+> [!NOTE]
+> macOS builds are unsigned, so Gatekeeper blocks the first launch: open **System Settings → Privacy
+> & Security** and choose **Open Anyway**, or right-click the app and choose **Open**. Windows and
+> Linux builds update themselves from GitHub Releases, while unsigned macOS builds do not check for
+> updates and are upgraded by downloading a new version.
+
+> [!NOTE]
+> On macOS 15 and later, the first time PalSentry connects to a Palworld server on your local network
+> macOS asks whether it may access that network. Allow it: without permission macOS silently drops
+> every connection, and PalSentry can only report the server as unreachable. If you missed the prompt,
+> turn PalSentry on under **System Settings → Privacy & Security → Local Network**.
+
+
+### Docker
+
+PalSentry is also available as a docker image that allows you deploy it as a WebUI.
+
+#### Docker Run
 ```sh
 docker run -d -p 3000:3000 -e PALWORLD_REST_URL="http://192.168.1.50:8212" -e PALWORLD_ADMIN_PASSWORD="your Palworld AdminPassword" wisdomsky/palsentry:latest
 ```
 
-### Docker Compose
+#### Docker Compose
 
 ```yaml
 services:
@@ -42,32 +67,6 @@ Once running, PalSentry can now be accessed from the browser:
 http://localhost:3000
 ```
 
-### Desktop app
-
-PalSentry is also available as a desktop app for macOS, Windows and Linux. Download the installer for
-your platform and open it — every release is also listed on
-[GitHub Releases](https://github.com/WisdomSky/PalSentry/releases).
-
-<!-- downloads:start -->
-
-[![Windows](https://img.shields.io/badge/Windows-PalSentry--Setup--1.2.0.exe-0078D6?logo=windows&logoColor=white)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.0/PalSentry-Setup-1.2.0.exe)
-[![macOS](https://img.shields.io/badge/macOS-PalSentry--1.2.0--arm64.dmg-000000?logo=apple&logoColor=white)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.0/PalSentry-1.2.0-arm64.dmg)
-[![Linux](https://img.shields.io/badge/Linux-PalSentry--1.2.0.AppImage-FCC624?logo=linux&logoColor=black)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.0/PalSentry-1.2.0.AppImage)
-
-<!-- downloads:end -->
-
-> [!NOTE]
-> macOS builds are unsigned, so Gatekeeper blocks the first launch: open **System Settings → Privacy
-> & Security** and choose **Open Anyway**, or right-click the app and choose **Open**. Windows and
-> Linux builds update themselves from GitHub Releases, while unsigned macOS builds do not check for
-> updates and are upgraded by downloading a new version.
-
-> [!NOTE]
-> On macOS 15 and later, the first time PalSentry connects to a Palworld server on your local network
-> macOS asks whether it may access that network. Allow it: without permission macOS silently drops
-> every connection, and PalSentry can only report the server as unreachable. If you missed the prompt,
-> turn PalSentry on under **System Settings → Privacy & Security → Local Network**.
-
 ---
 
 ## Features
@@ -88,7 +87,7 @@ The map keeps the selected player in view even when they travel long distances o
 
 #### Wayback Mode
 
-PalSentry records where players are as it runs, so the map can be replayed instead of only showing the present. The **Wayback map** button on the Players tab opens the last 24 hours with every player PalSentry has seen — including the ones who logged off hours ago.
+PalSentry records where players are as it runs, so the map can be replayed instead of only showing the present. The **Wayback map** button on the World map opens the last 24 hours: scrub the timeline and each dot moves to the position recorded for that moment, showing only the players who were online in it.
 
 ![Wayback Mode](screenshots/3.3-livemap-replay.png)
 

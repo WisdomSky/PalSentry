@@ -16,8 +16,8 @@ import { usePolling } from '@/composables/usePolling';
 import { usePlayerHistory } from '@/composables/usePlayerHistory';
 import { api, errorMessage } from '@/lib/api';
 import { resolveMapMeta } from '@/lib/map-display';
-import { formatChartTimestamp, formatInterval } from '@/lib/format';
-import { buildWaybackScene } from '@/lib/wayback';
+import { formatInterval } from '@/lib/format';
+import { waybackMarkersAt } from '@/lib/wayback';
 import EmptyState from '@/components/EmptyState.vue';
 import OfflineBanner from '@/components/OfflineBanner.vue';
 import HistoryRangeFilter from '@/components/HistoryRangeFilter.vue';
@@ -340,16 +340,9 @@ const historyEmpty = computed(
   () => history.response.value !== null && snapshots.value.length === 0,
 );
 
-/**
- * The drawable scene for the shown instant: one entry per player, trails cut where the record is
- * not contiguous.
- */
+/** The players recorded at the shown instant, and where each of them was. */
 const scene = computed(() =>
-  buildWaybackScene(
-    history.response.value?.players ?? [],
-    effectiveTime.value,
-    history.response.value?.bucketSeconds ?? 0,
-  ),
+  waybackMarkersAt(history.response.value?.players ?? [], effectiveTime.value),
 );
 
 /**
@@ -360,20 +353,13 @@ const scene = computed(() =>
  */
 const showWaybackBases = ref(false);
 
-const offlineCount = computed(() => scene.value.filter((player) => !player.online).length);
-
 /**
- * The as-of roster, online players first and then by how recently they were seen.
+ * The same players the map is drawing, in name order.
  *
- * The map answers "where", this list answers "who" — including players who were not in the
- * selected observation, which is exactly the group a live Positions table can never show.
+ * The map answers "where", this list answers "who" — and it lists exactly the accounts in the
+ * selected observation, so the two can never disagree.
  */
-const waybackRows = computed(() =>
-  [...scene.value].sort((a, b) => {
-    if (a.online !== b.online) return a.online ? -1 : 1;
-    return (b.lastSeenTs ?? 0) - (a.lastSeenTs ?? 0);
-  }),
-);
+const waybackRows = computed(() => [...scene.value].sort((a, b) => a.name.localeCompare(b.name)));
 </script>
 
 <template>
@@ -484,7 +470,9 @@ const waybackRows = computed(() =>
             Following the newest observation as it is recorded.
           </template>
           <template v-else> Holding one moment. Pick the newest column to follow again. </template>
-          <span v-if="scene.length > 0"> · {{ offlineCount }} offline at this time</span>
+          <span v-if="scene.length > 0">
+            · {{ scene.length }} {{ scene.length === 1 ? 'player' : 'players' }} at this time
+          </span>
         </p>
 
         <label class="flex items-center gap-2">
@@ -582,9 +570,7 @@ const waybackRows = computed(() =>
         :online="server.online"
         :map="mapMeta"
         :tracked-user-id="trackedUserId"
-        :wayback="
-          isWayback && effectiveTime !== null ? { players: scene, at: effectiveTime } : null
-        "
+        :wayback="isWayback && effectiveTime !== null ? scene : null"
       />
     </section>
 
@@ -592,17 +578,17 @@ const waybackRows = computed(() =>
       <div class="card-header">
         <h2 class="card-title">Positions at this time</h2>
         <span class="text-xs text-slate-500 dark:text-slate-400">
-          Recorded positions, newest sighting first.
+          Exactly the players recorded at this moment.
         </span>
       </div>
 
       <EmptyState
         v-if="!history.loading.value && waybackRows.length === 0"
-        title="No positions at this time"
+        title="Nobody was recorded then"
         :description="
           historyEmpty
             ? 'Nothing was recorded in the selected range.'
-            : 'PalSentry has no recorded position for any known player at the selected moment.'
+            : 'No player was online in the observation at this moment.'
         "
       />
 
@@ -611,7 +597,6 @@ const waybackRows = computed(() =>
           <thead>
             <tr class="border-b border-slate-200 dark:border-slate-800">
               <th scope="col" class="table-head">Player</th>
-              <th scope="col" class="table-head">Status</th>
               <th scope="col" class="table-head text-right">X</th>
               <th scope="col" class="table-head text-right">Y</th>
             </tr>
@@ -621,7 +606,6 @@ const waybackRows = computed(() =>
               v-for="player in waybackRows"
               :key="player.userId"
               class="border-b border-slate-100 last:border-0 dark:border-slate-800/60"
-              :class="player.online ? '' : 'opacity-75'"
             >
               <td class="cell">
                 <span
@@ -631,23 +615,11 @@ const waybackRows = computed(() =>
                 />
                 <span class="font-medium">{{ player.name }}</span>
               </td>
-              <td class="cell">
-                <span
-                  v-if="player.online"
-                  class="badge bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300"
-                >
-                  Online at this time
-                </span>
-                <span v-else class="text-xs text-slate-500 dark:text-slate-400">
-                  Offline · last seen
-                  {{ player.lastSeenTs === null ? '—' : formatChartTimestamp(player.lastSeenTs) }}
-                </span>
+              <td class="cell text-right font-mono text-xs tabular-nums">
+                {{ Math.round(player.position.x) }}
               </td>
               <td class="cell text-right font-mono text-xs tabular-nums">
-                {{ player.position === null ? '—' : Math.round(player.position.x) }}
-              </td>
-              <td class="cell text-right font-mono text-xs tabular-nums">
-                {{ player.position === null ? '—' : Math.round(player.position.y) }}
+                {{ Math.round(player.position.y) }}
               </td>
             </tr>
           </tbody>

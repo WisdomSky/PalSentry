@@ -35,8 +35,8 @@ import {
   type CalibrationByLayer,
   type ProjectionContext,
 } from '@/lib/map-display';
-import { formatChartTimestamp, pingTone } from '@/lib/format';
-import type { WaybackPlayerScene } from '@/lib/wayback';
+import { pingTone } from '@/lib/format';
+import type { WaybackMarker } from '@/lib/wayback';
 
 const props = withDefaults(
   defineProps<{
@@ -54,7 +54,7 @@ const props = withDefaults(
      * Supplied instead of `players` rather than alongside it: the two describe different moments,
      * and showing both on one map would invite reading a live pin as history.
      */
-    wayback?: { players: WaybackPlayerScene[]; at: number } | null;
+    wayback?: WaybackMarker[] | null;
   }>(),
   {
     bases: () => [],
@@ -278,77 +278,31 @@ const basePins = computed<BasePin[]>(() =>
 /** True while a recorded instant is being shown instead of the live world. */
 const waybackActive = computed(() => props.wayback !== null);
 
-interface TrailShape {
-  key: string;
-  colour: string;
-  name: string;
-  points: string;
-}
-
-/**
- * Trail polylines for the open region.
- *
- * Segments are built per region, so filtering by layer here is exact rather than a consequence of
- * which points happen to project. Projection can still drop an individual point (a custom texture
- * or calibration change), and a leftover single point is not a path, so those are skipped too.
- */
-const trailShapes = computed<TrailShape[]>(() => {
-  const scene = props.wayback;
-  if (scene === null) return [];
-
-  return scene.players.flatMap((player) =>
-    player.trail.flatMap((segment, index) => {
-      if (segment.layer !== activeLayer.value) return [];
-
-      const points = segment.points.flatMap((point) => {
-        const projected = projectLocation(point.x, point.y);
-        return projected === null ? [] : [`${projected.x},${projected.y}`];
-      });
-      if (points.length < 2) return [];
-
-      return [
-        {
-          key: `${player.userId}-${index}`,
-          colour: player.colour,
-          name: player.name,
-          points: points.join(' '),
-        },
-      ];
-    }),
-  );
-});
-
 interface WaybackPin {
-  player: WaybackPlayerScene;
+  marker: WaybackMarker;
   position: MapPoint;
 }
 
+/**
+ * Recorded players in the open region.
+ *
+ * A marker whose position falls outside every known region — or outside the layer being viewed —
+ * cannot be projected, so it is left off this map rather than drawn somewhere approximate.
+ */
 const waybackPins = computed<WaybackPin[]>(() => {
-  const scene = props.wayback;
-  if (scene === null) return [];
+  const markers = props.wayback;
+  if (markers === null) return [];
 
-  return scene.players.flatMap((player) => {
-    if (player.position === null) return [];
-    const position = projectLocation(player.position.x, player.position.y);
-    return position === null ? [] : [{ player, position }];
+  return markers.flatMap((marker) => {
+    const position = projectLocation(marker.position.x, marker.position.y);
+    return position === null ? [] : [{ marker, position }];
   });
 });
 
-const waybackPinCounts = computed(() => ({
-  online: waybackPins.value.filter((pin) => pin.player.online).length,
-  offline: waybackPins.value.filter((pin) => !pin.player.online).length,
-}));
-
 /** What a wayback marker says when hovered. */
-function waybackTooltip(player: WaybackPlayerScene): string {
-  const where =
-    player.position === null
-      ? ''
-      : ` · ${formatWorldCoordinate(player.position.x)}, ${formatWorldCoordinate(player.position.y)}`;
-
-  if (player.lastSeenTs === null) return 'No recorded position';
-  if (player.online) return `Online at this time${where}`;
-  return `Offline · last seen ${formatChartTimestamp(player.lastSeenTs)}${where}`;
+function waybackTooltip(marker: WaybackMarker): string {
+  const where = `${formatWorldCoordinate(marker.position.x)}, ${formatWorldCoordinate(marker.position.y)}`;
+  return `Online at this time · ${where}`;
 }
 
 interface LayerCounts {
@@ -362,9 +316,8 @@ const layerCounts = computed<Record<MapLayerId, LayerCounts>>(() => {
     worldTree: { players: 0, bases: 0 },
   };
   // Recorded players are counted where they were *then*, which may not be where they are now.
-  for (const player of props.wayback?.players ?? []) {
-    if (player.position === null) continue;
-    const layer = mapLayerForPoint(player.position);
+  for (const marker of props.wayback ?? []) {
+    const layer = mapLayerForPoint(marker.position);
     if (layer !== null) counts[layer].players += 1;
   }
   if (props.wayback === null) {
@@ -549,7 +502,7 @@ const textureVariable = computed(() =>
         <div class="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
           <MapPin class="h-3.5 w-3.5" aria-hidden="true" />
           <span v-if="waybackActive">
-            {{ waybackPinCounts.online }} online · {{ waybackPinCounts.offline }} offline at this
+            {{ waybackPins.length }} {{ waybackPins.length === 1 ? 'player' : 'players' }} at this
             time · {{ basePins.length }} {{ basePins.length === 1 ? 'base' : 'bases' }} on
             {{ activeDefinition.label }}
           </span>
@@ -728,56 +681,31 @@ const textureVariable = computed(() =>
           </template>
 
           <!--
-            Trails sit above the texture and the grid but below every marker: a path is context,
-            while the pins are the answer to "where was everyone?".
+            Recorded players, each at the position recorded for the shown instant. The transition is
+            what makes a replay read as movement: Vue reuses these elements across scrubs, so a dot
+            glides from one observation to the next instead of jumping. Pan and zoom are unaffected —
+            they are the parent's transform and the pin's scale, not `left`/`top`.
           -->
-          <svg
-            v-if="trailShapes.length > 0"
-            class="pointer-events-none absolute inset-0 h-full w-full"
-            :viewBox="`0 0 ${MAP_SCENE_SIZE} ${MAP_SCENE_SIZE}`"
-            preserveAspectRatio="none"
-            aria-hidden="true"
-          >
-            <polyline
-              v-for="shape in trailShapes"
-              :key="shape.key"
-              :points="shape.points"
-              fill="none"
-              :stroke="shape.colour"
-              stroke-width="2"
-              stroke-linejoin="round"
-              stroke-linecap="round"
-              opacity="0.85"
-              vector-effect="non-scaling-stroke"
-            >
-              <title>{{ shape.name }}</title>
-            </polyline>
-          </svg>
-
-          <!-- Recorded players, at their latest known position as of the shown instant. -->
           <div
             v-for="pin in waybackPins"
-            :key="pin.player.userId"
-            class="group absolute z-10"
+            :key="pin.marker.userId"
+            class="group absolute z-10 transition-[left,top] duration-300 ease-linear motion-reduce:transition-none"
             :style="markerStyle(pin.position)"
           >
             <span
-              class="block h-3 w-3 rounded-full border-2 shadow-md transition-transform group-hover:scale-125 dark:border-slate-900"
-              :class="pin.player.online ? 'border-white' : 'border-dashed opacity-60'"
-              :style="{ backgroundColor: pin.player.colour }"
+              class="block h-3 w-3 rounded-full border-2 border-white shadow-md transition-transform group-hover:scale-125 dark:border-slate-900"
+              :style="{ backgroundColor: pin.marker.colour }"
             />
             <span
               class="pointer-events-none absolute top-4 left-1/2 -translate-x-1/2 rounded px-1.5 py-0.5 text-[10px] whitespace-nowrap text-white"
-              :class="pin.player.online ? '' : 'opacity-70'"
-              :style="{ backgroundColor: pin.player.colour }"
+              :style="{ backgroundColor: pin.marker.colour }"
             >
-              {{ pin.player.name }}
-              <template v-if="!pin.player.online">· offline</template>
+              {{ pin.marker.name }}
             </span>
             <span
               class="pointer-events-none absolute top-9 left-1/2 hidden -translate-x-1/2 rounded bg-slate-900/95 px-2 py-1 text-[10px] whitespace-nowrap text-white shadow-lg group-hover:block"
             >
-              {{ waybackTooltip(pin.player) }}
+              {{ waybackTooltip(pin.marker) }}
             </span>
           </div>
 
