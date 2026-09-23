@@ -104,7 +104,8 @@ async function check(label, run) {
     record(label, true, typeof detail === 'string' ? detail : undefined);
     return true;
   } catch (error) {
-    record(label, false, error instanceof Error ? error.message : String(error));
+    const message = error instanceof Error ? error.message : String(error);
+    record(label, false, `${message} (${await appLogTail()})`);
     return false;
   }
 }
@@ -196,6 +197,37 @@ async function logMessages(logPath) {
   return (await readLogLines(logPath)).map((entry) => String(entry.msg ?? ''));
 }
 
+/** One log line as text: the interesting parts are usually fields, not `msg`. */
+function describeEntry(entry) {
+  const parts = [
+    entry.msg,
+    entry.status,
+    entry.message,
+    entry.error,
+    entry.err?.message,
+    entry.code,
+  ].filter((part) => typeof part === 'string' && part !== '');
+  return parts.length > 0 ? parts.join(' · ') : JSON.stringify(entry).slice(0, 200);
+}
+
+/**
+ * The app's own account of a failure. A check that can only report "timed out" says nothing about
+ * why, and CI job logs need admin rights to read afterwards: the shell writes to main.log and the
+ * embedded server to palsentry.log, and both are worth quoting here.
+ */
+async function appLogTail() {
+  const parts = [`app ${exitDescription}`];
+
+  for (const logPath of [mainLogPath, path.join(userDataDir, 'logs', 'palsentry.log')]) {
+    const tail = (await readLogLines(logPath)).slice(-3).map(describeEntry);
+    parts.push(`${path.basename(logPath)}: ${tail.length === 0 ? 'no lines' : tail.join(' · ')}`);
+  }
+
+  return parts.join(' | ');
+}
+
+const CDP_TIMEOUT_MS = 15_000;
+
 // ---------------------------------------------------------------------------
 // Chrome DevTools Protocol clients: the renderer page, and the main process
 // ---------------------------------------------------------------------------
@@ -216,10 +248,27 @@ async function cdp(port, expression, { method = 'Runtime.evaluate', params = {} 
   let nextId = 0;
   const pending = new Map();
 
+  // Every wait is bounded, and a closing socket fails the calls in flight: an app that dies (or is
+  // replaced by an installer) must fail the check in seconds rather than hanging it forever.
   function send(command, commandParams) {
     return new Promise((resolve, reject) => {
       const id = (nextId += 1);
-      pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`${command} timed out after ${CDP_TIMEOUT_MS}ms`));
+      }, CDP_TIMEOUT_MS);
+
+      pending.set(id, {
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
+
       socket.send(JSON.stringify({ id, method: command, params: commandParams }));
     });
   }
@@ -233,9 +282,26 @@ async function cdp(port, expression, { method = 'Runtime.evaluate', params = {} 
     else entry.resolve(message.result);
   });
 
+  socket.addEventListener('close', () => {
+    for (const [id, entry] of pending) {
+      pending.delete(id);
+      entry.reject(new Error('the DevTools socket closed before the app answered'));
+    }
+  });
+
   await new Promise((resolve, reject) => {
-    socket.addEventListener('open', resolve);
-    socket.addEventListener('error', reject);
+    const timer = setTimeout(
+      () => reject(new Error(`DevTools socket on ${port} did not open`)),
+      CDP_TIMEOUT_MS,
+    );
+    socket.addEventListener('open', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    socket.addEventListener('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
   });
 
   try {
