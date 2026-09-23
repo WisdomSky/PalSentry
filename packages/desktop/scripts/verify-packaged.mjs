@@ -331,15 +331,50 @@ async function startFeedServer(directory) {
   const server = createServer(async (request, response) => {
     const name = path.basename(new URL(request.url ?? '/', 'http://localhost').pathname);
 
+    let body;
     try {
-      const body = await readFile(path.join(directory, name));
-      response.writeHead(200, {
-        'Content-Type': name.endsWith('.yml') ? 'text/yaml' : 'application/octet-stream',
-      });
-      response.end(body);
+      body = await readFile(path.join(directory, name));
     } catch {
       response.writeHead(404).end('not found');
+      return;
     }
+
+    const type = name.endsWith('.yml') ? 'text/yaml' : 'application/octet-stream';
+
+    // electron-updater downloads differentially by default, asking for byte ranges of the artifact
+    // and of its .blockmap. Answering those with the whole file (200) corrupts the download, which
+    // then fails its checksum and never reaches the ready state the update check waits for.
+    const match = /^bytes=(\d*)-(\d*)$/.exec(String(request.headers.range ?? ''));
+    if (match !== null && (match[1] !== '' || match[2] !== '')) {
+      const start =
+        match[1] === '' ? Math.max(0, body.length - Number(match[2])) : Number(match[1]);
+      const end =
+        match[1] === '' || match[2] === ''
+          ? body.length - 1
+          : Math.min(Number(match[2]), body.length - 1);
+
+      if (start > end || start >= body.length) {
+        response.writeHead(416, { 'Content-Range': `bytes */${body.length}` }).end();
+        return;
+      }
+
+      const slice = body.subarray(start, end + 1);
+      response.writeHead(206, {
+        'Content-Type': type,
+        'Content-Length': slice.length,
+        'Accept-Ranges': 'bytes',
+        'Content-Range': `bytes ${start}-${end}/${body.length}`,
+      });
+      response.end(slice);
+      return;
+    }
+
+    response.writeHead(200, {
+      'Content-Type': type,
+      'Content-Length': body.length,
+      'Accept-Ranges': 'bytes',
+    });
+    response.end(request.method === 'HEAD' ? undefined : body);
   });
 
   await new Promise((resolve) => server.listen(port, '127.0.0.1', resolve));
@@ -408,6 +443,18 @@ if (feed !== null && updateFeed !== null) {
   );
   const advertised = (await response.text()).match(/^version:\s*(.+)$/m)?.[1]?.trim();
   assert(advertised === updateTo, `the served feed advertises ${advertised}, expected ${updateTo}`);
+
+  // Differential downloads are the updater's default, and they only work when ranges come back as
+  // 206s — so prove that here instead of discovering it as a 120-second timeout later.
+  const ranged = await fetch(`${feed.url}/${updateFeed.file}`, {
+    headers: { range: 'bytes=0-99' },
+  });
+  assert(
+    ranged.status === 206,
+    `a range request returned ${ranged.status}; differential downloads would fail`,
+  );
+  const rangedBody = Buffer.from(await ranged.arrayBuffer());
+  assert(rangedBody.length === 100, `a 100-byte range returned ${rangedBody.length} bytes`);
 }
 
 console.log(`verifying ${appPath}`);
@@ -687,14 +734,26 @@ try {
     record('installs an N → N+1 update', true, 'skipped: unsigned macOS builds do not update');
   } else {
     await check(`installs the ${updateTo} update and restarts`, async () => {
-      await waitFor(
-        'downloaded update',
-        async () =>
-          (await logMessages(mainLogPath)).some((message) =>
-            message.includes('is ready — Restart to update'),
-          ),
-        { timeoutMs: 120_000, intervalMs: 1_000 },
-      );
+      try {
+        await waitFor(
+          'downloaded update',
+          async () =>
+            (await logMessages(mainLogPath)).some((message) =>
+              message.includes('is ready — Restart to update'),
+            ),
+          { timeoutMs: 120_000, intervalMs: 1_000 },
+        );
+      } catch (error) {
+        // A download that fails says why in the app's own log; a bare timeout says nothing, and CI
+        // job logs need admin rights to read afterwards.
+        const lines = (await logMessages(mainLogPath))
+          .filter((message) => /update|download|error/i.test(message))
+          .slice(-4)
+          .join(' | ');
+        throw new Error(
+          `${error?.message ?? String(error)} (app log: ${lines === '' ? 'no update lines' : lines})`,
+        );
+      }
 
       await mainEval(
         inspectorPort,
