@@ -152,7 +152,7 @@ there.
 Without overrides, the dashboard login is `admin` / `admin`, the session secret uses the documented shared default, and destructive actions are enabled. These defaults are convenient on a trusted local network; before exposing PalSentry, add safer overrides under `environment`.
 
 ```yaml
-PALSENTRY_LOGIN_PASSWORD: 'some-cute-username'
+PALSENTRY_LOGIN_USERNAME: 'some-cute-username'
 PALSENTRY_LOGIN_PASSWORD: 'a-password-stronger-than-love'
 PALSENTRY_SESSION_SECRET: 'replace-with-a-random-secret-at-least-32-characters-long'
 PALSENTRY_ALLOW_DESTRUCTIVE: 'false'
