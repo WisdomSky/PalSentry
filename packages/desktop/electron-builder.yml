@@ -1,0 +1,108 @@
+# electron-builder configuration for the PalSentry desktop app.
+#
+# Run through the package scripts (`npm run package:mac`, `-win`, `-linux`, or `package` for the
+# current platform), which build the server bundle, the SPA and the shell into `dist/` first.
+#
+# Artifacts land in `release/` (git-ignored) and, when published, beside `latest*.yml` metadata in
+# one GitHub Release — that metadata is what electron-updater reads.
+
+appId: com.palsentry.app
+productName: PalSentry
+copyright: PalSentry contributors
+
+directories:
+  buildResources: build
+  # Not `dist`: that is the staged application (main.js, server.js, public/, assets/).
+  output: release
+
+# Everything the app needs at runtime is already assembled in `dist/` by `scripts/stage.mjs`, plus
+# the production dependencies of this package — which is exactly `better-sqlite3`.
+files:
+  - dist/**/*
+  - package.json
+  - '!**/*.map'
+
+asar: true
+
+# better-sqlite3 is a native addon and cannot be loaded from inside an asar archive. The whole
+# package is unpacked so the addon's own resolution (prebuilds/ or build/Release/) keeps working.
+asarUnpack:
+  - '**/node_modules/better-sqlite3/**'
+
+# The v13 line ships per-platform Node-API prebuilds that load under Electron unchanged — verified
+# against Electron 44 (ABI 149) before this config existed. Rebuilding would need a C++ toolchain on
+# every runner and buys nothing, so it is off. If Electron ever outruns those prebuilds, delete this
+# line and add @electron/rebuild to the release workflow.
+npmRebuild: false
+
+# Unsigned for now: there is no Developer ID certificate, so signing would fail the build. macOS
+# users download the dmg/zip manually and pass Gatekeeper once. Remove `identity: null` when signing
+# credentials exist, and note that auto-update on macOS only starts working at that point.
+mac:
+  category: public.app-category.utilities
+  icon: build/icon.png
+  identity: null
+  notarize: false
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  # macOS 15 and later deny an app access to the local network (a Palworld server on 192.168.x.x,
+  # 10.x.x.x or *.local) unless the app says why it needs it. Without this key the denial is silent:
+  # no permission prompt, no entry in System Settings, and connections are dropped at the network
+  # layer, which the app can only report as an unreachable server.
+  extendInfo:
+    NSLocalNetworkUsageDescription: PalSentry connects to your Palworld server on the local network to read its status, players and metrics.
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+
+win:
+  icon: build/icon.png
+  target:
+    - target: nsis
+      arch: [x64]
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+
+linux:
+  icon: build/icon.png
+  category: Utility
+  # Linux names the binary after the package name — `palsentrydesktop` now, and the scoped
+  # `@palsentry/desktop` before the rename, which is not even a legal file name and made AppImage
+  # packaging fail outright. Keep it lowercase, the way Linux expects a command to be spelled.
+  executableName: palsentry
+  # Electron uses package.json's `desktopName` as its app_id/WM_CLASS on Wayland. Naming the
+  # installed .desktop file after it lets desktops link the running window to the launcher entry.
+  syncDesktopName: true
+  synopsis: Palworld server dashboard
+  description: >-
+    PalSentry monitors a Palworld dedicated server: live players and bases, performance metrics,
+    bans and audit history, and a replayable map of where everyone has been.
+  maintainer: PalSentry <wisdomsky@users.noreply.github.com>
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+
+deb:
+  # fpm downcases it anyway (Debian package names are lower case); saying so explicitly drops its
+  # "I have downcased the package name for you" warning.
+  packageName: palsentry
+  # The deb artifact is named after the package name by default, so this workspace package made
+  # electron-builder write into `release/@palsentry/` — a directory that does not exist, which fails
+  # the build — and would have landed outside the workflow's `release/*.deb` upload glob.
+  artifactName: PalSentry-${version}-amd64.deb
+
+# electron-updater reads this at runtime; the release workflow publishes to the same place.
+publish:
+  provider: github
+  owner: wisdomsky
+  repo: palsentry
+  releaseType: release

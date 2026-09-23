@@ -42,6 +42,23 @@ Once running, PalSentry can now be accessed from the browser:
 http://localhost:3000
 ```
 
+### Desktop app
+
+PalSentry is also available as a desktop app for macOS, Windows and Linux. Download the installer for
+your platform from [GitHub Releases](https://github.com/WisdomSky/PalSentry/releases) and open it.
+
+> [!NOTE]
+> macOS builds are unsigned, so Gatekeeper blocks the first launch: open **System Settings → Privacy
+> & Security** and choose **Open Anyway**, or right-click the app and choose **Open**. Windows and
+> Linux builds update themselves from GitHub Releases, while unsigned macOS builds do not check for
+> updates and are upgraded by downloading a new version.
+
+> [!NOTE]
+> On macOS 15 and later, the first time PalSentry connects to a Palworld server on your local network
+> macOS asks whether it may access that network. Allow it: without permission macOS silently drops
+> every connection, and PalSentry can only report the server as unreachable. If you missed the prompt,
+> turn PalSentry on under **System Settings → Privacy & Security → Local Network**.
+
 ---
 
 ## Features
@@ -63,14 +80,6 @@ The map keeps the selected player in view even when they travel long distances o
 #### Wayback Mode
 
 PalSentry records where players are as it runs, so the map can be replayed instead of only showing the present. The **Wayback map** button on the Players tab opens the last 24 hours with every player PalSentry has seen — including the ones who logged off hours ago.
-
-- Scrub the datetime strip to preview any recorded moment, then click, tap, or use the arrow keys to hold one. The whole range is loaded once, so moving the pointer never issues a request.
-- Trails are drawn up to the selected moment and break across outages and region changes, so a line on the map only ever shows movement PalSentry actually observed.
-- Players who were not online at the selected moment stay on the map at their last known position, faded and labelled with when they were last seen.
-- Current guild bases can be added as context, marked as current rather than historical.
-- **Cancel Wayback map** returns to the live map with live tracking, bases, and pins exactly as they were.
-
-Recording continues while no dashboard is open, at a cadence chosen from the Players tab (5s, 15s, 30s, 1m, or 5m — 60s by default). The cadence is stored in the database, so it survives restarts, and it is independent of `PALSENTRY_SAMPLE_INTERVAL_SECONDS`. Detail costs storage: the default records about 1,400 positions per player per day, while 5 seconds records about 17,000.
 
 ![Wayback Mode](screenshots/3.3-livemap-replay.png)
 
@@ -136,10 +145,14 @@ By default, server metrics are collected every minute and displayed in clean, ea
 | `PALSENTRY_MAP_PROJECTION`                 | `new`        | Map projection mode: `none`, `new` for Palworld 1.0+, or `legacy`                        |
 | `LOG_LEVEL`                                | `info`       | Logging level: `fatal`, `error`, `warn`, `info`, `debug`, `trace`, or `silent`           |
 
+`PALWORLD_REST_URL` and `PALWORLD_ADMIN_PASSWORD` are required by the container image and by
+`npm start`; the [desktop app](#desktop-app) collects them in the app instead, so they are optional
+there.
+
 Without overrides, the dashboard login is `admin` / `admin`, the session secret uses the documented shared default, and destructive actions are enabled. These defaults are convenient on a trusted local network; before exposing PalSentry, add safer overrides under `environment`.
 
 ```yaml
-PALSENTRY_LOGIN_PASSWORD: 'some-cute-username'
+PALSENTRY_LOGIN_USERNAME: 'some-cute-username'
 PALSENTRY_LOGIN_PASSWORD: 'a-password-stronger-than-love'
 PALSENTRY_SESSION_SECRET: 'replace-with-a-random-secret-at-least-32-characters-long'
 PALSENTRY_ALLOW_DESTRUCTIVE: 'false'
@@ -170,6 +183,20 @@ services:
 ```
 
 This allows historical metrics, player information, and other persistent data to survive container upgrades and recreation.
+
+The desktop app keeps the same database, together with its own settings and logs, in the per-user
+application data directory:
+
+| Platform | Location                                  |
+| -------- | ----------------------------------------- |
+| macOS    | `~/Library/Application Support/PalSentry` |
+| Windows  | `%APPDATA%\PalSentry`                     |
+| Linux    | `~/.config/PalSentry`                     |
+
+`palsentry.db` holds the recorded history, `desktop.json` remembers the port and the Palworld REST
+URL, `window.json` remembers the window geometry, and `logs/main.log` and `logs/palsentry.log` hold
+the app and server logs. **Open log folder** in the tray menu and **Open data folder** in the
+application menu open these for you.
 
 ## Security
 

@@ -6,20 +6,26 @@
   "type": "module",
   "license": "AGPL-3.0-only",
   "engines": {
-    "node": ">=20.19"
+    "node": ">=22.14"
   },
   "workspaces": [
     "packages/shared",
     "packages/server",
-    "packages/web"
+    "packages/web",
+    "packages/desktop"
   ],
   "scripts": {
     "dev": "concurrently -n server,web -c cyan,magenta \"npm:dev:server\" \"npm:dev:web\"",
     "dev:server": "tsx watch --env-file-if-exists=.env packages/server/src/index.ts",
     "dev:web": "npm run dev -w @palsentry/web",
     "build": "npm run build -w @palsentry/web && npm run build -w @palsentry/server",
+    "build:desktop-server": "npm run build:desktop -w @palsentry/server",
+    "build:desktop": "npm run build -w @palsentry/web && npm run build:desktop-server && npm run build -w palsentrydesktop",
+    "dev:desktop": "npm run build -w palsentrydesktop && concurrently -n server,web,app -c cyan,magenta,green \"cross-env PALSENTRY_DESKTOP=1 PALSENTRY_DATA_DIR=.desktop-dev npm run dev:server\" \"npm:dev:web\" \"cross-env PALSENTRY_DESKTOP_DEV_URL=http://127.0.0.1:5173 npm run dev -w palsentrydesktop\"",
+    "package:desktop": "npm run build:desktop && npm run package -w palsentrydesktop",
+    "verify:desktop": "node packages/desktop/scripts/verify-packaged.mjs",
     "start": "node --env-file-if-exists=.env packages/server/dist/index.js",
-    "typecheck": "npm run typecheck -w @palsentry/server && npm run typecheck -w @palsentry/web",
+    "typecheck": "npm run typecheck -w @palsentry/server && npm run typecheck -w @palsentry/web && npm run typecheck -w palsentrydesktop",
     "test": "npm run test -w @palsentry/server",
     "lint": "prettier --check .",
     "format": "prettier --write .",
@@ -29,6 +35,7 @@
   },
   "devDependencies": {
     "concurrently": "^10.0.5",
+    "cross-env": "^10.1.0",
     "prettier": "^3.9.8",
     "typescript": "^5.9.3"
   },

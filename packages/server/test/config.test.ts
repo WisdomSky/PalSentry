@@ -367,4 +367,83 @@ describe('loadConfig', () => {
       assert.ok(config.webDistCandidates.some((p) => p.endsWith('public')));
     });
   });
+
+  describe('desktop hosting', () => {
+    /** Desktop mode with nothing else set: the connection screen has not been filled in yet. */
+    const desktopEnv = (overrides: Record<string, string | undefined> = {}) =>
+      validEnv({
+        PALWORLD_REST_URL: undefined,
+        PALWORLD_ADMIN_PASSWORD: undefined,
+        PALSENTRY_DESKTOP: '1',
+        ...overrides,
+      });
+
+    it('is off by default and reports an unconfigured, credential-less desktop state', () => {
+      const config = loadConfig(validEnv());
+      assert.equal(config.desktop.enabled, false);
+      assert.equal(config.desktop.configured, true);
+      assert.equal(config.desktop.configPath, null);
+    });
+
+    it('starts without any Palworld credentials and waits for the connection screen', () => {
+      const config = loadConfig(desktopEnv());
+      assert.equal(config.desktop.enabled, true);
+      assert.equal(config.desktop.configured, false);
+      // Nothing listens on the reserved loopback port, so upstream calls fail fast instead of
+      // hanging while the user has not connected yet.
+      assert.equal(config.palworld.apiBaseUrl, 'http://127.0.0.1:1/v1/api');
+      assert.equal(config.palworld.password, '');
+    });
+
+    it('prefills a saved REST URL without treating it as configured', () => {
+      const config = loadConfig(desktopEnv({ PALWORLD_REST_URL: 'http://10.0.0.9:8212/' }));
+      assert.equal(config.desktop.configured, false);
+      assert.equal(config.palworld.apiBaseUrl, 'http://10.0.0.9:8212/v1/api');
+    });
+
+    it('is configured when the shell supplies both values', () => {
+      const config = loadConfig(
+        desktopEnv({ PALWORLD_REST_URL: 'http://10.0.0.9:8212', PALWORLD_ADMIN_PASSWORD: 'pw' }),
+      );
+      assert.equal(config.desktop.configured, true);
+      assert.equal(config.palworld.password, 'pw');
+    });
+
+    it('resolves the shell-owned config path', () => {
+      const config = loadConfig(
+        desktopEnv({ PALSENTRY_DESKTOP_CONFIG: '/tmp/palsentry/desktop.json' }),
+      );
+      assert.equal(config.desktop.configPath, '/tmp/palsentry/desktop.json');
+    });
+
+    it('accepts port 0 so the shell can ask the OS for a free port', () => {
+      const config = loadConfig(desktopEnv({ PALSENTRY_PORT: '0' }));
+      assert.equal(config.port, 0);
+    });
+
+    it('drops warnings about public exposure that a loopback-only app cannot act on', () => {
+      const config = loadConfig(
+        desktopEnv({
+          PALSENTRY_LOGIN_PASSWORD: undefined,
+          PALSENTRY_SESSION_SECRET: undefined,
+          PALSENTRY_ALLOW_DESTRUCTIVE: 'true',
+          NODE_ENV: 'production',
+        }),
+      );
+
+      assert.ok(config.allowDestructive);
+      assert.deepEqual(config.warnings, []);
+    });
+
+    it('still requires credentials when the desktop flag is absent', () => {
+      assertConfigError(
+        validEnv({ PALWORLD_ADMIN_PASSWORD: undefined }),
+        'PALWORLD_ADMIN_PASSWORD is required',
+      );
+      assertConfigError(
+        validEnv({ PALWORLD_REST_URL: undefined }),
+        'PALWORLD_REST_URL is required',
+      );
+    });
+  });
 });

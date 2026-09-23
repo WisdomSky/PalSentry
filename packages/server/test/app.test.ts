@@ -144,6 +144,7 @@ describe('POST /api/auth/login', () => {
     assert.deepEqual(response.json<MeResponse>(), {
       authenticated: true,
       user: { username: TEST_USERNAME },
+      desktop: false,
     });
 
     const setCookie = String(response.headers['set-cookie']);
@@ -294,7 +295,11 @@ describe('/api/auth/me and /api/auth/logout', () => {
     const response = await app.inject({ method: 'GET', url: '/api/auth/me' });
 
     assert.equal(response.statusCode, 200);
-    assert.deepEqual(response.json<MeResponse>(), { authenticated: false, user: null });
+    assert.deepEqual(response.json<MeResponse>(), {
+      authenticated: false,
+      user: null,
+      desktop: false,
+    });
   });
 
   it('reports the user with a valid cookie', async () => {
@@ -306,6 +311,7 @@ describe('/api/auth/me and /api/auth/logout', () => {
     assert.deepEqual(response.json<MeResponse>(), {
       authenticated: true,
       user: { username: TEST_USERNAME },
+      desktop: false,
     });
   });
 

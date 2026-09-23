@@ -14,6 +14,14 @@ import type { SessionUser } from '@palsentry/shared';
 
 export const SESSION_COOKIE_NAME = 'palsentry_session';
 
+/**
+ * Username reported while the desktop app is connected.
+ *
+ * There is no login in desktop mode, but the session shape is what the guard, `/auth/me` and the
+ * SPA already agree on, so a connected desktop app presents this fixed identity.
+ */
+export const DESKTOP_SESSION_USERNAME = 'Local';
+
 export interface SessionPayload {
   /** Username the session was issued to. */
   u: string;

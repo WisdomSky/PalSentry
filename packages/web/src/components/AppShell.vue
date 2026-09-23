@@ -75,8 +75,16 @@ const POLL_CHOICES = computed(() => {
 });
 
 async function signOut(): Promise<void> {
-  await session.logout();
-  ui.info('Signed out');
+  // Desktop hosting has no PalSentry account, so "sign out" is really "disconnect": the Palworld
+  // password is dropped and recording stops, and the connection screen takes over.
+  if (session.desktop) {
+    await session.disconnect();
+    ui.info('Disconnected from the Palworld server');
+  } else {
+    await session.logout();
+    ui.info('Signed out');
+  }
+
   await router.push({ name: 'login' });
 }
 
@@ -194,11 +202,17 @@ function onNavigate(): void {
           <button
             type="button"
             class="btn-ghost btn-xs"
-            :title="`Sign out${session.user ? ` (${session.user.username})` : ''}`"
+            :title="
+              session.desktop
+                ? 'Disconnect from the Palworld server'
+                : `Sign out${session.user ? ` (${session.user.username})` : ''}`
+            "
             @click="signOut"
           >
             <LogOut class="h-4 w-4" aria-hidden="true" />
-            <span class="sr-only">Sign out</span>
+            <span class="sr-only">
+              {{ session.desktop ? 'Disconnect' : 'Sign out' }}
+            </span>
           </button>
         </div>
       </div>

@@ -29,6 +29,10 @@ COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/
 COPY packages/server/package.json packages/server/
 COPY packages/web/package.json packages/web/
+COPY packages/desktop/package.json packages/desktop/
+
+# The image never runs Electron: skip downloading its ~100 MB binary to keep the build fast.
+ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 
 RUN npm ci
 

@@ -191,3 +191,16 @@ export const auditQuerySchema = z.object({
 export const idParamSchema = z.object({
   id: z.coerce.number().int().positive(),
 });
+
+/**
+ * Desktop connection form.
+ *
+ * The URL is left as a free string on purpose: it is normalised and probed by the settings
+ * service, which produces the actionable message ("REST API port", "RESTAPIEnabled", "rejected the
+ * credentials") that a schema-level URL check could not.
+ */
+export const connectionSchema = z.object({
+  restUrl: z.string().trim().min(1, 'Enter the REST URL of your Palworld server.').max(2048),
+  adminPassword: z.string().max(512),
+  username: z.string().trim().max(200).optional(),
+});

@@ -9,6 +9,12 @@ data/
 *.db-wal
 *.db-shm
 
+# Desktop development state (npm run dev:desktop uses this instead of the real userData folder)
+.desktop-dev/
+
+# electron-builder output
+release/
+
 # Secrets
 .env
 .env.local

@@ -30,7 +30,12 @@ export function metaRoutes(ctx: AppContext) {
   return async function meta(app: FastifyInstance): Promise<void> {
     app.get('/meta', async (): Promise<MetaResponse> => {
       return {
-        app: { version: APP_VERSION, authEnabled: true },
+        app: {
+          version: APP_VERSION,
+          // Desktop hosting replaces the PalSentry login with the Palworld connection screen.
+          authEnabled: !ctx.config.desktop.enabled,
+          desktop: ctx.config.desktop.enabled,
+        },
         destructiveAllowed: ctx.config.allowDestructive,
         map: ctx.config.map,
         polling: {
