@@ -1,3 +1,5 @@
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { startPalSentry } from './server.js';
 
 /**
@@ -21,9 +23,29 @@ export { createLogger } from './logger.js';
 export type { Logger, LoggerSetup } from './logger.js';
 
 const entry = process.argv[1];
-const isMain = entry !== undefined && import.meta.url === new URL(`file://${entry}`).href;
 
-if (isMain) {
+/**
+ * True when this file is the process entry point.
+ *
+ * Electron hands the shell's own switches to the main process, so `process.argv[1]` is often
+ * something like `--user-data-dir=C:\Users\...`. Pasting that into a `file://` URL throws
+ * "Invalid URL" on Windows, which stopped the embedded server from starting at all, so compare
+ * resolved paths and treat anything unreadable as "not the entry point".
+ */
+export function isEntryPoint(
+  entry: string | undefined,
+  moduleUrl: string = import.meta.url,
+): boolean {
+  if (entry === undefined || entry === '') return false;
+
+  try {
+    return realpathSync(entry) === realpathSync(fileURLToPath(moduleUrl));
+  } catch {
+    return false;
+  }
+}
+
+if (isEntryPoint(entry)) {
   const running = await startPalSentry();
 
   let shuttingDown = false;

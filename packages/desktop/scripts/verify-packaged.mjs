@@ -27,7 +27,7 @@
 
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
@@ -814,14 +814,14 @@ try {
   } else if (process.platform === 'darwin') {
     record('installs an N → N+1 update', true, 'skipped: unsigned macOS builds do not update');
   } else {
-    // The AppImage updater installs by moving the downloaded file over the running AppImage, then
-    // re-runs it with an empty argv (`spawnLog(destination, [], env)`), so the relaunch cannot carry
-    // the --no-sandbox a headless runner needs to start Chromium and dies before it logs anything.
-    // Linux therefore asserts the install — the file at that path must become the bytes the feed
-    // served — and leaves the relaunch to Windows, where the platform needs no such switch.
+    // The AppImage updater installs by deleting the running AppImage and moving the download next to
+    // it under the downloaded file's own name, then re-runs it with an empty argv
+    // (`spawnLog(destination, [], env)`), so the relaunch cannot carry the --no-sandbox a headless
+    // runner needs to start Chromium and dies before it logs anything. Linux therefore asserts the
+    // install and leaves the relaunch to Windows, where the platform needs no such switch.
     const updateCheckName =
       process.platform === 'linux'
-        ? `installs the ${updateTo} update in place`
+        ? `installs the ${updateTo} update`
         : `installs the ${updateTo} update and restarts`;
     await check(updateCheckName, async () => {
       // "Restart to update" in the menu is what the user actually sees, and the ready text is logged
@@ -836,12 +836,16 @@ try {
            return null;
          };`;
 
-      const menuSaysReady = async () =>
-        (await mainEval(
+      // Readiness is the menu item the user can actually click. The item exists from the moment the
+      // updater is created but stays disabled until a download is ready, and clicking a disabled item
+      // is a silent no-op — which is how the Linux install check failed while the log said "ready".
+      const menuState = async () =>
+        await mainEval(
           inspectorPort,
           `${menuFinder}
-           return find(Menu.getApplicationMenu().items) === null ? null : 'present';`,
-        ).catch(() => null)) === 'present';
+           const item = find(Menu.getApplicationMenu().items);
+           return { present: item !== null, enabled: item !== null && item.enabled === true };`,
+        ).catch(() => null);
 
       const logSaysReady = async () =>
         (await readLogLines(mainLogPath)).some(
@@ -851,11 +855,10 @@ try {
         );
 
       try {
-        await waitFor(
-          'downloaded update',
-          async () => (await menuSaysReady()) || (await logSaysReady()),
-          { timeoutMs: 120_000, intervalMs: 1_000 },
-        );
+        await waitFor('downloaded update', async () => (await menuState())?.enabled === true, {
+          timeoutMs: 120_000,
+          intervalMs: 1_000,
+        });
       } catch (error) {
         // A download that fails says why in the app's own log; a bare timeout says nothing, and CI
         // job logs need admin rights to read afterwards.
@@ -868,8 +871,18 @@ try {
               .join(' · '),
           )
           .join(' | ');
+        const state = await menuState();
+        const described =
+          state === null
+            ? 'unreadable'
+            : state.present
+              ? state.enabled
+                ? 'enabled'
+                : `present but disabled${(await logSaysReady()) ? ' while the log says ready' : ''}`
+              : 'absent';
+
         throw new Error(
-          `${error?.message ?? String(error)} (app log: ${lines === '' ? 'no update lines' : lines})`,
+          `${error?.message ?? String(error)} (menu: ${described}; app log: ${lines === '' ? 'no update lines' : lines})`,
         );
       }
 
@@ -882,20 +895,56 @@ try {
          return 'clicked';`,
       );
 
+      // A click on a disabled item does nothing at all, so prove the shell actually started shutting
+      // down rather than letting a later assertion fail for a reason that hides this one.
+      const shuttingDown = await waitFor(
+        'the shell to start shutting down',
+        async () => (await logMessages(mainLogPath)).includes('Shutting down'),
+        { timeoutMs: 20_000, intervalMs: 500 },
+      )
+        .then(() => true)
+        .catch(() => false);
+
+      assert(
+        shuttingDown,
+        `clicking 'Restart to update' did nothing (menu: ${JSON.stringify(await menuState())})`,
+      );
+
       if (process.platform === 'linux') {
         assert(updateFeed.payload !== null, 'the update feed does not name the artifact it serves');
 
-        const served = await digestFile(path.join(feedDir, updateFeed.payload));
-        const replaced = await waitFor(
-          'the AppImage to be replaced',
-          async () => (await digestFile(appPath)) === served,
+        // "Not replaced" could mean the updater never moved the file or that it moved something else,
+        // so report what the path held, what it holds now, and what was served.
+        const describeFile = async (file) => {
+          try {
+            const stats = statSync(file);
+            return `${(await digestFile(file)).slice(0, 12)} (${stats.size} bytes)`;
+          } catch {
+            return 'unreadable';
+          }
+        };
+
+        // electron-updater deletes the running AppImage and moves the download next to it under the
+        // downloaded file's own name, because the running file's name already carries a version.
+        const servedPath = path.join(feedDir, updateFeed.payload);
+        const installedPath = path.join(path.dirname(appPath), updateFeed.payload);
+        const served = await digestFile(servedPath);
+
+        const installed = await waitFor(
+          `${path.basename(installedPath)} to appear`,
+          async () => (await digestFile(installedPath).catch(() => null)) === served,
           { timeoutMs: 30_000, intervalMs: 1_000 },
         )
           .then(() => true)
           .catch(() => false);
 
-        assert(replaced, 'the AppImage was not replaced by the downloaded update');
-        return `installed ${updateTo} in place (the AppImage relaunch is not asserted here)`;
+        assert(
+          installed,
+          `the downloaded update was not installed: ${installedPath} is ${await describeFile(installedPath)}, ${appPath} is ${await describeFile(appPath)}, and the feed served ${await describeFile(servedPath)}`,
+        );
+        assert(!existsSync(appPath), `the old AppImage ${appPath} was left behind`);
+
+        return `installed ${updateTo} as ${path.basename(installedPath)} (the AppImage relaunch is not asserted here)`;
       }
 
       // The installer replaces the app and starts it again; the relaunch writes to its own log, and

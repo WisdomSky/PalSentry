@@ -9,7 +9,9 @@ import type {
   MetaResponse,
   StatusResponse,
 } from '@palsentry/shared';
+import { fileURLToPath } from 'node:url';
 import { localNetworkHint } from '../src/services/desktop-settings.js';
+import { isEntryPoint } from '../src/desktop-entry.js';
 import { createTestApp, type TestApp } from './helpers/test-app.js';
 
 /**
@@ -577,5 +579,31 @@ describe('macOS local network hint', () => {
     assert.equal(localNetworkHint('http://192.168.50.200:8212/v1/api', 'linux'), '');
     assert.equal(localNetworkHint('http://192.168.50.200:8212/v1/api', 'win32'), '');
     assert.equal(localNetworkHint('not a url', 'darwin'), '');
+  });
+});
+
+describe('desktop bundle entry guard', () => {
+  it('only starts when the bundle itself is the entry point', () => {
+    assert.equal(isEntryPoint(undefined), false);
+    assert.equal(isEntryPoint(''), false);
+    assert.equal(isEntryPoint(fileURLToPath(import.meta.url), import.meta.url), true);
+    assert.equal(
+      isEntryPoint(fileURLToPath(import.meta.url)),
+      false,
+      'another file is not the bundle',
+    );
+  });
+
+  it('survives the arguments Electron hands the main process', () => {
+    // Electron puts its own switches in argv[1]. Building a `file://` URL out of this by hand threw
+    // "Invalid URL" on Windows (a drive-letter path is not valid there), which stopped the embedded
+    // server from ever starting, so the guard must reject it quietly instead.
+    assert.equal(
+      isEntryPoint('--user-data-dir=C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\palsentry-verify'),
+      false,
+    );
+    assert.equal(isEntryPoint('--user-data-dir=/tmp/palsentry-verify'), false);
+    assert.equal(isEntryPoint('--inspect=9417'), false);
+    assert.equal(isEntryPoint(path.join(tmpdir(), 'does-not-exist-server.js')), false);
   });
 });
