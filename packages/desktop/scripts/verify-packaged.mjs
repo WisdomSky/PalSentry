@@ -822,11 +822,12 @@ try {
   await check('renders the dashboard with live players', async () => {
     await cdp(rendererPort, '', { method: 'Page.navigate', params: { url: `${origin}/` } });
 
-    // Wait for the heading rather than for a player's name: the page the previous check left behind
-    // can still be on screen when the poll starts, and a name is not proof the dashboard rendered.
+    // Wait for the dashboard's own card, not for a player's name and not for the navigation's label:
+    // the page the previous check left behind can still be on screen when the poll starts, and the
+    // navigation drops its labels on a narrow window, which a CI runner's screen produces.
     const text = await waitFor('the dashboard', async () => {
       const body = await rendererEval(rendererPort, 'document.body.innerText').catch(() => '');
-      return body.includes('Dashboard') ? body : null;
+      return /online players/i.test(body) ? body : null;
     }).catch(async (error) => {
       const where = await rendererEval(rendererPort, 'location.pathname + location.search').catch(
         () => '?',
@@ -837,7 +838,7 @@ try {
       );
     });
 
-    assert(text.includes('Alice'), 'the dashboard does not list the online players');
+    assert(/alice/i.test(text), 'the dashboard does not list the online players');
 
     return 'dashboard shows the connected server’s players';
   });
