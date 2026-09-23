@@ -734,21 +734,49 @@ try {
     record('installs an N → N+1 update', true, 'skipped: unsigned macOS builds do not update');
   } else {
     await check(`installs the ${updateTo} update and restarts`, async () => {
+      // "Restart to update" in the menu is what the user actually sees, and the ready text is logged
+      // as a structured field that a message-only reader would miss — so accept either signal.
+      const menuFinder = `const { Menu } = req('electron');
+         const find = (items) => {
+           for (const item of items) {
+             if (item.label === 'Restart to update') return item;
+             const hit = item.submenu ? find(item.submenu.items) : null;
+             if (hit) return hit;
+           }
+           return null;
+         };`;
+
+      const menuSaysReady = async () =>
+        (await mainEval(
+          inspectorPort,
+          `${menuFinder}
+           return find(Menu.getApplicationMenu().items) === null ? null : 'present';`,
+        ).catch(() => null)) === 'present';
+
+      const logSaysReady = async () =>
+        (await readLogLines(mainLogPath)).some(
+          (entry) =>
+            entry.msg === 'Update status changed' &&
+            String(entry.status ?? '').includes('is ready'),
+        );
+
       try {
         await waitFor(
           'downloaded update',
-          async () =>
-            (await logMessages(mainLogPath)).some((message) =>
-              message.includes('is ready — Restart to update'),
-            ),
+          async () => (await menuSaysReady()) || (await logSaysReady()),
           { timeoutMs: 120_000, intervalMs: 1_000 },
         );
       } catch (error) {
         // A download that fails says why in the app's own log; a bare timeout says nothing, and CI
         // job logs need admin rights to read afterwards.
-        const lines = (await logMessages(mainLogPath))
-          .filter((message) => /update|download|error/i.test(message))
+        const lines = (await readLogLines(mainLogPath))
+          .filter((entry) => /update|download|error/i.test(JSON.stringify(entry)))
           .slice(-4)
+          .map((entry) =>
+            [entry.msg, entry.status, entry.error]
+              .filter((part) => typeof part === 'string' && part !== '')
+              .join(' · '),
+          )
           .join(' | ');
         throw new Error(
           `${error?.message ?? String(error)} (app log: ${lines === '' ? 'no update lines' : lines})`,
@@ -757,15 +785,7 @@ try {
 
       await mainEval(
         inspectorPort,
-        `const { Menu } = req('electron');
-         const find = (items) => {
-           for (const item of items) {
-             if (item.label === 'Restart to update') return item;
-             const hit = item.submenu ? find(item.submenu.items) : null;
-             if (hit) return hit;
-           }
-           return null;
-         };
+        `${menuFinder}
          const item = find(Menu.getApplicationMenu().items);
          if (item === null) throw new Error('Restart to update is missing from the menu');
          item.click();
@@ -786,7 +806,23 @@ try {
             ),
           ).then((found) => found.some(Boolean)),
         { timeoutMs: 180_000, intervalMs: 2_000 },
-      );
+      ).catch(async (error) => {
+        // The installer starts the new version itself, so it carries none of our switches and writes
+        // to its own log directory: report what each candidate actually holds.
+        const seen = [];
+        for (const logPath of logCandidates) {
+          const entries = await readLogLines(logPath);
+          const tail = entries
+            .slice(-3)
+            .map(
+              (entry) =>
+                `${String(entry.msg ?? '')}${entry.version === undefined ? '' : ` v${entry.version}`}`,
+            )
+            .join(' · ');
+          seen.push(`${logPath}: ${tail === '' ? 'no log' : tail}`);
+        }
+        throw new Error(`${error?.message ?? String(error)} (${seen.join(' | ')})`);
+      });
 
       assert(started, 'the updated app never started');
       await waitFor('app exit before install', () => exited, { timeoutMs: 30_000 }).catch(
