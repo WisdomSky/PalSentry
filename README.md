@@ -13,7 +13,6 @@ Monitor players, track activity on a live world map, manage your server, review 
 
 ## Installation
 
-
 ### Desktop app
 
 PalSentry is available as a desktop app for macOS, Windows and Linux. Download the installer for
@@ -34,12 +33,12 @@ your platform and open it — every release is also listed on
 > every connection, and PalSentry can only report the server as unreachable. If you missed the prompt,
 > turn PalSentry on under **System Settings → Privacy & Security → Local Network**.
 
-
 ### Docker
 
 PalSentry is also available as a docker image that allows you deploy it as a WebUI.
 
 #### Docker Run
+
 ```sh
 docker run -d -p 3000:3000 -e PALWORLD_REST_URL="http://192.168.1.50:8212" -e PALWORLD_ADMIN_PASSWORD="your Palworld AdminPassword" wisdomsky/palsentry:latest
 ```
