@@ -96,6 +96,19 @@ function record(label, passed, detail) {
   results.push({ label, passed, detail });
   const mark = passed ? '  ok  ' : ' FAIL ';
   console.log(`${mark} ${label}${detail === undefined ? '' : ` — ${detail}`}`);
+
+  // GitHub job logs need admin rights to read, but annotations are public through the API, so a
+  // failing check reports itself instead of needing someone to copy the log out of the browser.
+  if (!passed && process.env.GITHUB_ACTIONS === 'true') {
+    console.log(
+      `::error::${annotationText(detail === undefined ? label : `${label} — ${detail}`)}`,
+    );
+  }
+}
+
+// Workflow commands are line-based and GitHub truncates long annotations, so flatten and escape.
+function annotationText(text) {
+  return text.replace(/%/g, '%25').replace(/\r?\n/g, ' · ').replace(/\r/g, '%0D').slice(0, 1000);
 }
 
 async function check(label, run) {
@@ -1021,6 +1034,8 @@ const failed = results.filter((result) => !result.passed);
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
 
 if (failed.length > 0) {
-  console.error(`failed: ${failed.map((result) => result.label).join(', ')}`);
+  const summary = `failed: ${failed.map((result) => result.label).join(', ')}`;
+  console.error(summary);
+  if (process.env.GITHUB_ACTIONS === 'true') console.error(`::error::${annotationText(summary)}`);
   process.exit(1);
 }
