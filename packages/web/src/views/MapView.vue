@@ -5,10 +5,13 @@ import { AlertTriangle, Crosshair, History, LoaderCircle, MapPin, RefreshCw, X }
 import {
   DEFAULT_WAYBACK_WINDOW,
   HISTORY_WINDOWS,
+  minimumTimelineSpanSeconds,
   type BasesResponse,
   type HistorySelection,
   type HistoryWindow,
   type PalworldGuildBase,
+  type TimeBounds,
+  type TimeRange,
   type WaybackSnapshot,
 } from '@palsentry/shared';
 import { useServerStore } from '@/stores/server';
@@ -146,28 +149,8 @@ const effectiveTime = computed(
 );
 /** True when the view tracks the newest observation rather than one the operator chose. */
 const followingLatest = computed(() => pinnedSnapshot.value === null);
-
-/**
- * Keep the committed instant honest as the window rolls forward.
- *
- * Two repairs, both written with `replace` so they never become history entries the operator has
- * to back out of: a pin that lands between two observations is moved onto the nearer one, and a
- * pin on the newest observation becomes "follow the tail" again — otherwise the view would sit
- * frozen one interval behind the data with no obvious way to resume.
- */
-watch([committedAt, snapshots], () => {
-  const requested = committedAt.value;
-  if (requested === null || snapshots.value.length === 0) return;
-
-  const snapped = snapToSnapshot(requested, snapshots.value);
-  if (snapped === null) return;
-
-  if (snapped === newestSnapshot.value) {
-    updateWaybackQuery({ at: undefined });
-    return;
-  }
-  if (snapped !== requested) updateWaybackQuery({ at: String(snapped) });
-});
+/** True while the URL names a rolling preset; a custom range is a fixed slice of past data. */
+const rollingWindow = computed(() => waybackSelection.value.kind === 'window');
 
 /**
  * Write wayback state back to the URL.
@@ -212,12 +195,11 @@ function showWayback(): void {
 /** Pin the map to an instant recorded in the URL, so a chosen time can be shared. */
 function commitWaybackTime(ts: number): void {
   previewAt.value = null;
-  // Choosing the newest observation means "keep up with the server", not "freeze here". Writing
-  // it down would leave the view pinned one interval behind the data with nothing to say so.
-  updateWaybackQuery(
-    { at: ts === newestSnapshot.value ? undefined : String(ts) },
-    { replace: false },
-  );
+  // Choosing the newest observation of a rolling window means "keep up with the server", not
+  // "freeze here". Writing it down would leave the view pinned one interval behind the data with
+  // nothing to say so. A fixed range cannot roll, so it always names the moment it replays.
+  const follow = rollingWindow.value && ts === newestSnapshot.value;
+  updateWaybackQuery({ at: follow ? undefined : String(ts) }, { replace: false });
 }
 
 /** Change the range. The pinned instant does not survive: it belonged to the old range. */
@@ -233,6 +215,19 @@ function changeWaybackSelection(selection: HistorySelection): void {
           at: undefined,
         },
   );
+}
+
+/**
+ * Adopt a viewport the operator panned or zoomed to.
+ *
+ * The visible window is stored as an absolute range, because a rolling preset cannot describe a
+ * window someone dragged: the first gesture resolves it. The pinned instant deliberately stays in
+ * the URL — the response watcher moves it onto the nearest observation that is still in view, so
+ * panning does not silently change which moment the map is showing.
+ */
+function changeWaybackViewport(range: TimeRange): void {
+  previewAt.value = null;
+  updateWaybackQuery({ window: undefined, from: String(range.from), to: String(range.to) });
 }
 
 /** Leave wayback mode, restoring the ordinary live map exactly as it was. */
@@ -332,13 +327,95 @@ async function refreshMap(): Promise<void> {
 
 /** Retention bound for the wayback range filter; mirrors the server's own limit. */
 const retentionDays = computed(() => server.meta?.history.retentionDays ?? ASSUMED_RETENTION_DAYS);
+const retentionSeconds = computed(() => Math.max(1, Math.floor(retentionDays.value)) * 86_400);
 
 /** The loaded range, for the timeline's layout. */
 const historyFrom = computed(() => history.response.value?.from ?? null);
 const historyTo = computed(() => history.response.value?.to ?? null);
-const historyEmpty = computed(
-  () => history.response.value !== null && snapshots.value.length === 0,
+
+/**
+ * The visible range.
+ *
+ * A custom selection *is* the viewport, so it comes straight from the URL: the timeline does not
+ * wait for the matching response to draw the window the operator just panned to. A rolling preset
+ * has no boundaries of its own, so it follows whatever the server resolved for it.
+ */
+const viewportFrom = computed(() =>
+  waybackSelection.value.kind === 'range' ? waybackSelection.value.from : historyFrom.value,
 );
+const viewportTo = computed(() =>
+  waybackSelection.value.kind === 'range' ? waybackSelection.value.to : historyTo.value,
+);
+
+/**
+ * True while the drawn observations belong to a range the viewport has already left.
+ *
+ * Panning issues a request, and until it lands the previous range's snapshots are still in hand.
+ * They are clipped to the new window and dimmed rather than passed off as this range's data.
+ */
+const historyStale = computed(() => {
+  const response = history.response.value;
+  if (response === null || viewportFrom.value === null || viewportTo.value === null) return false;
+  return response.from !== viewportFrom.value || response.to !== viewportTo.value;
+});
+
+/** An answer with no observations is only "empty" once it describes the range being shown. */
+const historyEmpty = computed(
+  () => !historyStale.value && history.response.value !== null && snapshots.value.length === 0,
+);
+
+/**
+ * Keep the committed instant honest as the range changes under it.
+ *
+ * Three repairs, all written with `replace` so they never become history entries the operator has
+ * to back out of: a pin that lands between two observations is moved onto the nearer one, a pin on
+ * the newest observation of a rolling window becomes "follow the tail" again — otherwise the view
+ * would sit frozen one interval behind the data with no obvious way to resume — and a fixed range
+ * that names no moment at all adopts the newest observation it contains, because only a rolling
+ * window may mean "whatever is newest right now".
+ */
+watch([committedAt, snapshots], () => {
+  // Stale snapshots belong to the range the operator has already left; repairing against them
+  // would pin the new range to an instant it does not contain.
+  if (historyStale.value) return;
+
+  if (snapshots.value.length === 0) {
+    // An empty range has nothing to replay, so a pin carried over from another range would name a
+    // moment this range does not contain.
+    if (historyEmpty.value && committedAt.value !== null) updateWaybackQuery({ at: undefined });
+    return;
+  }
+
+  const newest = newestSnapshot.value;
+  if (newest === null) return;
+  const requested = committedAt.value;
+
+  if (requested === null) {
+    if (rollingWindow.value) return;
+    updateWaybackQuery({ at: String(newest) });
+    return;
+  }
+
+  const snapped = snapToSnapshot(requested, snapshots.value);
+  if (snapped === null) return;
+
+  if (snapped === newest && rollingWindow.value) {
+    updateWaybackQuery({ at: undefined });
+    return;
+  }
+  if (snapped !== requested) updateWaybackQuery({ at: String(snapped) });
+});
+
+/** The closest the timeline may zoom: two recording intervals, and never under a minute. */
+const minimumWaybackSpan = computed(() =>
+  minimumTimelineSpanSeconds(server.waybackIntervalSeconds),
+);
+
+/** The instants wayback may cover: retained history through the present. */
+const waybackBounds = computed<TimeBounds>(() => {
+  const to = Math.max(historyTo.value ?? 0, Math.floor(Date.now() / 1_000));
+  return { from: to - retentionSeconds.value, to };
+});
 
 /** The players recorded at the shown instant, and where each of them was. */
 const scene = computed(() =>
@@ -399,7 +476,8 @@ const waybackRows = computed(() => [...scene.value].sort((a, b) => a.name.locale
         <div class="min-w-0">
           <h2 class="card-title">Replay</h2>
           <p class="text-xs text-slate-500 dark:text-slate-400">
-            Hover to preview a moment, click or press an arrow key to hold it.
+            Drag to pan through time, pinch or Ctrl/Cmd+wheel to zoom, and click or press an arrow
+            key to hold a moment.
           </p>
         </div>
 
@@ -407,6 +485,9 @@ const waybackRows = computed(() => [...scene.value].sort((a, b) => a.name.locale
           :model-value="waybackSelection"
           :retention-days="retentionDays"
           :default-custom-span-seconds="24 * 60 * 60"
+          :seconds-precision="true"
+          :bounds="waybackBounds"
+          :minimum-span-seconds="minimumWaybackSpan"
           label="History range"
           class="ml-auto"
           @update:model-value="changeWaybackSelection"
@@ -418,18 +499,19 @@ const waybackRows = computed(() => [...scene.value].sort((a, b) => a.name.locale
         </button>
       </div>
 
-      <div class="p-4 pt-3">
+      <div class="space-y-2 p-4 pt-3">
         <p
           v-if="history.error.value !== null"
           class="rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-200"
           role="alert"
         >
           {{ history.error.value }}
+          <span v-if="historyStale">The timeline below is still the previous range.</span>
           <button type="button" class="ml-1 underline" @click="history.reload()">Retry</button>
         </p>
 
         <p
-          v-else-if="history.loading.value"
+          v-if="history.loading.value"
           class="flex items-center justify-center gap-2 py-6 text-xs text-slate-500 dark:text-slate-400"
           role="status"
         >
@@ -437,25 +519,43 @@ const waybackRows = computed(() => [...scene.value].sort((a, b) => a.name.locale
           Loading recorded positions…
         </p>
 
-        <p
-          v-else-if="historyEmpty"
-          class="rounded-lg border border-dashed border-slate-300 px-3 py-6 text-center text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400"
-        >
-          Nothing was recorded in this range. PalSentry records positions every
-          {{ formatInterval(server.waybackIntervalSeconds) }} while it is running — a gap this long
-          usually means it was not.
-        </p>
+        <!--
+          The timeline stays mounted for an empty range: panning out of a gap is exactly what
+          someone staring at "nothing was recorded" wants to do next.
+        -->
+        <template v-else-if="viewportFrom !== null && viewportTo !== null">
+          <WaybackTimeline
+            :snapshots="snapshots"
+            :from="viewportFrom"
+            :to="viewportTo"
+            :value="pinnedSnapshot"
+            :preview="previewAt"
+            :retention-days="retentionDays"
+            :interval-seconds="server.waybackIntervalSeconds"
+            :class="historyStale ? 'opacity-40' : ''"
+            @preview="previewAt = $event"
+            @update:value="commitWaybackTime"
+            @update:range="changeWaybackViewport"
+          />
 
-        <WaybackTimeline
-          v-else-if="historyFrom !== null && historyTo !== null"
-          :snapshots="snapshots"
-          :from="historyFrom"
-          :to="historyTo"
-          :value="pinnedSnapshot"
-          :preview="previewAt"
-          @preview="previewAt = $event"
-          @update:value="commitWaybackTime"
-        />
+          <p
+            v-if="history.refreshing.value && history.error.value === null"
+            class="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400"
+            role="status"
+          >
+            <LoaderCircle class="h-3 w-3 animate-spin" aria-hidden="true" />
+            {{ historyStale ? 'Loading this range…' : 'Refreshing…' }}
+          </p>
+
+          <p
+            v-else-if="historyEmpty"
+            class="rounded-lg border border-dashed border-slate-300 px-3 py-6 text-center text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400"
+          >
+            Nothing was recorded in this range. PalSentry records positions every
+            {{ formatInterval(server.waybackIntervalSeconds) }} while it is running — a gap this
+            long usually means it was not.
+          </p>
+        </template>
       </div>
 
       <div
@@ -469,7 +569,12 @@ const waybackRows = computed(() => [...scene.value].sort((a, b) => a.name.locale
           <template v-else-if="followingLatest">
             Following the newest observation as it is recorded.
           </template>
-          <template v-else> Holding one moment. Pick the newest column to follow again. </template>
+          <template v-else-if="rollingWindow">
+            Holding one moment. Pick the newest column to follow again.
+          </template>
+          <template v-else>
+            A fixed range. Pick a rolling window to follow the server again.
+          </template>
           <span v-if="scene.length > 0">
             · {{ scene.length }} {{ scene.length === 1 ? 'player' : 'players' }} at this time
           </span>

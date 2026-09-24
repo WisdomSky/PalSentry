@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   DEFAULT_MAP_PROJECTION,
   DEFAULT_MAP_TEXTURE_URL,
+  DEFAULT_WAYBACK_INTERVAL_SECONDS,
   DEFAULT_WORLD_TREE_TEXTURE_URL,
 } from '@palsentry/shared';
 import { verifyPassword } from '../src/auth/password.js';
@@ -46,6 +47,8 @@ describe('loadConfig', () => {
     assert.equal(config.allowDestructive, true, 'destructive actions are enabled by default');
     assert.equal(config.history.retentionDays, 30);
     assert.equal(config.history.sampleIntervalSeconds, 60);
+    assert.equal(config.history.waybackIntervalSeconds, 5);
+    assert.equal(DEFAULT_WAYBACK_INTERVAL_SECONDS, 5);
     assert.equal(config.map.projection, DEFAULT_MAP_PROJECTION);
     assert.equal(config.map.layers.palpagos.textureUrl, DEFAULT_MAP_TEXTURE_URL);
     assert.equal(config.map.layers.worldTree.textureUrl, DEFAULT_WORLD_TREE_TEXTURE_URL);
@@ -230,12 +233,14 @@ describe('loadConfig', () => {
           PALSENTRY_SESSION_TTL_HOURS: '48',
           PALSENTRY_HISTORY_RETENTION_DAYS: '7',
           PALSENTRY_SAMPLE_INTERVAL_SECONDS: '15',
+          PALSENTRY_WAYBACK_INTERVAL_SECONDS: '30',
         }),
       );
       assert.equal(config.port, 8080);
       assert.equal(config.auth.sessionTtlHours, 48);
       assert.equal(config.history.retentionDays, 7);
       assert.equal(config.history.sampleIntervalSeconds, 15);
+      assert.equal(config.history.waybackIntervalSeconds, 30);
     });
 
     it('rejects a non-integer', () => {
@@ -246,6 +251,14 @@ describe('loadConfig', () => {
     it('rejects out-of-range values', () => {
       assertConfigError(validEnv({ PALSENTRY_PORT: '99999' }), 'must be between');
       assertConfigError(validEnv({ PALSENTRY_SAMPLE_INTERVAL_SECONDS: '1' }), 'must be between');
+      assertConfigError(
+        validEnv({ PALSENTRY_WAYBACK_INTERVAL_SECONDS: '1' }),
+        'PALSENTRY_WAYBACK_INTERVAL_SECONDS',
+      );
+      assertConfigError(
+        validEnv({ PALSENTRY_WAYBACK_INTERVAL_SECONDS: '7200' }),
+        'must be between 5 and 3600',
+      );
     });
   });
 

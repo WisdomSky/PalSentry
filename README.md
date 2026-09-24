@@ -19,7 +19,9 @@ PalSentry is available as a desktop app for macOS, Windows and Linux. Download t
 your platform and open it — every release is also listed on
 [GitHub Releases](https://github.com/WisdomSky/PalSentry/releases).
 
-[![Windows](images/download-windows.png)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.1/PalSentry-Setup-1.2.1.exe) [![macOS](images/download-macos.png)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.1/PalSentry-1.2.1-arm64.dmg) [![Linux](images/download-linux.png)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.1/PalSentry-1.2.1.AppImage)
+<!-- downloads:start -->
+[![Windows](images/download-windows.png)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.2/PalSentry-Setup-1.2.2.exe) [![macOS](images/download-macos.png)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.2/PalSentry-1.2.2-arm64.dmg) [![Linux](images/download-linux.png)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.2/PalSentry-1.2.2.AppImage)
+<!-- downloads:end -->
 
 > [!NOTE]
 > macOS builds are unsigned, so Gatekeeper blocks the first launch: open **System Settings → Privacy
@@ -131,26 +133,27 @@ By default, server metrics are collected every minute and displayed in clean, ea
 
 ## Environment Variables
 
-| Variable                                   | Default      | Description                                                                              |
-| ------------------------------------------ | ------------ | ---------------------------------------------------------------------------------------- |
-| `PALWORLD_REST_URL`                        | **Required** | Palworld REST API host and port                                                          |
-| `PALWORLD_ADMIN_PASSWORD`                  | **Required** | Palworld `AdminPassword`                                                                 |
-| `PALSENTRY_SESSION_SECRET`                 | ``           | Cookie-signing secret; must be at least 32 characters                                    |
-| `PALSENTRY_LOGIN_USERNAME`                 | `admin`      | PalSentry dashboard login username                                                       |
-| `PALSENTRY_LOGIN_PASSWORD`                 | `admin`      | Plaintext dashboard password                                                             |
-| `PALSERVER_REST_USERNAME`                  | `admin`      | HTTP Basic Authentication username used by the Palworld REST API                         |
-| `PALSENTRY_LOGIN_PASSWORD_HASH`            |              | Generated scrypt password hash; takes precedence over `PALSENTRY_LOGIN_PASSWORD`         |
-| `PALSENTRY_SESSION_TTL_HOURS`              | `12`         | Dashboard session lifetime in hours                                                      |
-| `PALSERVER_TIMEOUT_MS`                     | `10000`      | Palworld REST API request timeout in milliseconds                                        |
-| `PALSENTRY_ALLOW_DESTRUCTIVE`              | `true`       | Enables kick, ban, unban, shutdown, stop, and restart operations                         |
-| `PALSENTRY_TRUST_PROXY`                    | `false`      | Trust proxy IP headers and use Secure cookies                                            |
-| `PALSENTRY_SAMPLE_INTERVAL_SECONDS`        | `60`         | Metrics sampling interval (`5`–`3600`); position recording has its own dashboard setting |
-| `PALSENTRY_HISTORY_RETENTION_DAYS`         | `30`         | Days of metric and player-movement history retained (`1`–`3650`)                         |
-| `PALSENTRY_RESTART_WAIT_SECONDS`           | `30`         | Default player-warning countdown before a restart                                        |
-| `PALSENTRY_RESTART_HEALTH_TIMEOUT_SECONDS` | `180`        | Maximum time to wait for the server to become healthy after a restart                    |
-| `PALSENTRY_RESTART_POLL_INTERVAL_MS`       | `2000`       | Health-check interval while waiting for the server to return                             |
-| `PALSENTRY_MAP_PROJECTION`                 | `new`        | Map projection mode: `none`, `new` for Palworld 1.0+, or `legacy`                        |
-| `LOG_LEVEL`                                | `info`       | Logging level: `fatal`, `error`, `warn`, `info`, `debug`, `trace`, or `silent`           |
+| Variable                                   | Default      | Description                                                                      |
+| ------------------------------------------ | ------------ | -------------------------------------------------------------------------------- |
+| `PALWORLD_REST_URL`                        | **Required** | Palworld REST API host and port                                                  |
+| `PALWORLD_ADMIN_PASSWORD`                  | **Required** | Palworld `AdminPassword`                                                         |
+| `PALSENTRY_SESSION_SECRET`                 | ``           | Cookie-signing secret; must be at least 32 characters                            |
+| `PALSENTRY_LOGIN_USERNAME`                 | `admin`      | PalSentry dashboard login username                                               |
+| `PALSENTRY_LOGIN_PASSWORD`                 | `admin`      | Plaintext dashboard password                                                     |
+| `PALSERVER_REST_USERNAME`                  | `admin`      | HTTP Basic Authentication username used by the Palworld REST API                 |
+| `PALSENTRY_LOGIN_PASSWORD_HASH`            |              | Generated scrypt password hash; takes precedence over `PALSENTRY_LOGIN_PASSWORD` |
+| `PALSENTRY_SESSION_TTL_HOURS`              | `12`         | Dashboard session lifetime in hours                                              |
+| `PALSERVER_TIMEOUT_MS`                     | `10000`      | Palworld REST API request timeout in milliseconds                                |
+| `PALSENTRY_ALLOW_DESTRUCTIVE`              | `true`       | Enables kick, ban, unban, shutdown, stop, and restart operations                 |
+| `PALSENTRY_TRUST_PROXY`                    | `false`      | Trust proxy IP headers and use Secure cookies                                    |
+| `PALSENTRY_SAMPLE_INTERVAL_SECONDS`        | `60`         | Metrics sampling interval (`5`–`3600`)                                           |
+| `PALSENTRY_WAYBACK_INTERVAL_SECONDS`       | `5`          | Player position recording interval for Wayback Mode (`5`–`3600`)                 |
+| `PALSENTRY_HISTORY_RETENTION_DAYS`         | `30`         | Days of metric and player-movement history retained (`1`–`3650`)                 |
+| `PALSENTRY_RESTART_WAIT_SECONDS`           | `30`         | Default player-warning countdown before a restart                                |
+| `PALSENTRY_RESTART_HEALTH_TIMEOUT_SECONDS` | `180`        | Maximum time to wait for the server to become healthy after a restart            |
+| `PALSENTRY_RESTART_POLL_INTERVAL_MS`       | `2000`       | Health-check interval while waiting for the server to return                     |
+| `PALSENTRY_MAP_PROJECTION`                 | `new`        | Map projection mode: `none`, `new` for Palworld 1.0+, or `legacy`                |
+| `LOG_LEVEL`                                | `info`       | Logging level: `fatal`, `error`, `warn`, `info`, `debug`, `trace`, or `silent`   |
 
 `PALWORLD_REST_URL` and `PALWORLD_ADMIN_PASSWORD` are required by the container image and by
 `npm start`; the [desktop app](#desktop-app) collects them in the app instead, so they are optional

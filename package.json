@@ -1,6 +1,6 @@
 {
   "name": "palsentry",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "private": true,
   "description": "Web dashboard for managing a Palworld dedicated server through its official REST API",
   "type": "module",

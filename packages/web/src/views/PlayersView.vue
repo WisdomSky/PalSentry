@@ -31,11 +31,6 @@ function openAction(kind: 'kick' | 'ban' | 'unban', player: EnrichedPlayer): voi
 function showInMap(player: EnrichedPlayer): void {
   void router.push({ name: 'map', query: { track: player.userId } });
 }
-
-function onIntervalChange(event: Event): void {
-  const value = Number((event.target as HTMLSelectElement).value);
-  void server.updateWaybackInterval(value);
-}
 </script>
 
 <template>
@@ -64,26 +59,12 @@ function onIntervalChange(event: Event): void {
       </div>
 
       <div class="flex flex-wrap items-center gap-2">
-        <label
-          class="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400"
-          title="How often the server records player positions. Recording continues while no dashboard is open."
+        <p
+          class="text-xs text-slate-500 dark:text-slate-400"
+          title="Recording continues while no dashboard is open. Change it with the PALSENTRY_WAYBACK_INTERVAL_SECONDS environment variable."
         >
-          <span>Record every</span>
-          <select
-            class="input w-auto py-1 text-xs"
-            :value="server.waybackIntervalSeconds"
-            :disabled="server.waybackIntervalSaving"
-            @change="onIntervalChange"
-          >
-            <option
-              v-for="seconds in server.waybackIntervalOptions"
-              :key="seconds"
-              :value="seconds"
-            >
-              {{ formatInterval(seconds) }}
-            </option>
-          </select>
-        </label>
+          Recording positions every {{ formatInterval(server.waybackIntervalSeconds) }}
+        </p>
 
         <button
           type="button"

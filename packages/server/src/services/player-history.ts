@@ -1,8 +1,5 @@
 import {
-  DEFAULT_WAYBACK_INTERVAL_SECONDS,
   DEFAULT_WAYBACK_WINDOW,
-  WAYBACK_INTERVAL_OPTIONS,
-  isWaybackInterval,
   type HistorySelection,
   type HistoryWindow,
   type PlayerHistoryResponse,
@@ -14,7 +11,7 @@ import type { PalworldPlayer } from '@palsentry/shared';
 import type { Db } from '../db/index.js';
 import { prunePlayerHistory } from '../db/migrations.js';
 import type { Logger } from '../logger.js';
-import { resolveHistoryRange } from './history-range.js';
+import { resolveHistoryRange, waybackBucketSeconds } from './history-range.js';
 import type { PlayerService, PlayerSnapshot } from './players.js';
 
 /**
@@ -26,9 +23,9 @@ import type { PlayerService, PlayerSnapshot } from './players.js';
  *
  * Three properties this service is built around:
  *
- * 1. **The cadence is a setting, not a deployment detail.** It is stored in SQLite and changed
- *    from the dashboard, because the useful value depends on what the operator is investigating:
- *    fine-grained while chasing an incident, coarse the rest of the time.
+ * 1. **The cadence is deployment configuration.** It comes from
+ *    `PALSENTRY_WAYBACK_INTERVAL_SECONDS` and never changes while the process is up, so the
+ *    sampling rate is something an operator sets alongside the rest of their server config.
  * 2. **Only real observations are recorded.** A failed upstream read writes nothing, so the
  *    timeline keeps an honest gap rather than inventing a straight line across an outage.
  * 3. **An empty observation is still an observation.** A tick that reports nobody online is
@@ -59,9 +56,7 @@ export interface PlayerHistoryServiceOptions {
   logger: Logger;
   /** Shared with metric history: positions are pruned on the same schedule. */
   retentionDays: number;
-}
-
-interface IntervalRow {
+  /** How often positions are recorded, from `PALSENTRY_WAYBACK_INTERVAL_SECONDS`. */
   intervalSeconds: number;
 }
 
@@ -82,9 +77,7 @@ export class PlayerHistoryService {
   private readonly players: PlayerService;
   private readonly logger: Logger;
   private readonly retentionDays: number;
-
-  /** The cadence in force, mirrored in memory so reads never touch SQLite. */
-  private cadenceSeconds: number;
+  private readonly cadenceSeconds: number;
 
   private sampleTimer: NodeJS.Timeout | null = null;
   private pruneTimer: NodeJS.Timeout | null = null;
@@ -96,96 +89,16 @@ export class PlayerHistoryService {
     this.players = options.players;
     this.logger = options.logger;
     this.retentionDays = options.retentionDays;
-    this.cadenceSeconds = this.loadInterval();
+    this.cadenceSeconds = options.intervalSeconds;
   }
 
   // -------------------------------------------------------------------------
   // Recording cadence
   // -------------------------------------------------------------------------
 
-  /** The cadence recordings are currently taken at, in seconds. */
+  /** The cadence recordings are taken at, in seconds. Fixed for the life of the process. */
   get intervalSeconds(): number {
     return this.cadenceSeconds;
-  }
-
-  /**
-   * Read the persisted cadence, repairing it if it is missing or not one of the offered values.
-   *
-   * Self-healing rather than tolerant on purpose: a cadence outside the enum cannot be shown as a
-   * selected option in the UI, so leaving it in place would present an interval the operator
-   * cannot see or change back.
-   */
-  private loadInterval(): number {
-    const row = this.db
-      .prepare('SELECT interval_seconds AS intervalSeconds FROM wayback_settings WHERE id = 1')
-      .get() as IntervalRow | undefined;
-
-    if (row !== undefined && isWaybackInterval(row.intervalSeconds)) return row.intervalSeconds;
-
-    const reason =
-      row === undefined
-        ? 'no stored interval'
-        : `stored interval ${row.intervalSeconds}s is not an offered cadence`;
-
-    this.logger.warn(
-      { reason, fallbackSeconds: DEFAULT_WAYBACK_INTERVAL_SECONDS },
-      'Resetting the wayback recording interval to the default',
-    );
-    this.writeInterval(DEFAULT_WAYBACK_INTERVAL_SECONDS, new Date());
-
-    return DEFAULT_WAYBACK_INTERVAL_SECONDS;
-  }
-
-  private writeInterval(seconds: number, updatedAt: Date): void {
-    this.db
-      .prepare(
-        `INSERT INTO wayback_settings (id, interval_seconds, updated_at)
-         VALUES (1, @seconds, @updatedAt)
-         ON CONFLICT(id) DO UPDATE SET
-           interval_seconds = excluded.interval_seconds,
-           updated_at       = excluded.updated_at`,
-      )
-      .run({ seconds, updatedAt: updatedAt.toISOString() });
-  }
-
-  /**
-   * Persist and adopt a new recording cadence.
-   *
-   * The next sample is taken one full interval from now rather than immediately: a change of
-   * cadence is a statement about the future, and firing a read the moment the operator clicks
-   * "save" would make a cadence change look like a data point. Existing history is untouched —
-   * old samples were recorded at the old cadence and are read as such.
-   *
-   * Returns the interval now in force.
-   */
-  setIntervalSeconds(seconds: number, updatedAt: Date = new Date()): number {
-    if (!isWaybackInterval(seconds)) {
-      throw new RangeError(
-        `Recording interval must be one of ${WAYBACK_INTERVAL_OPTIONS.join(', ')} seconds, got ${seconds}.`,
-      );
-    }
-
-    if (seconds === this.cadenceSeconds) return this.cadenceSeconds;
-
-    this.writeInterval(seconds, updatedAt);
-    this.cadenceSeconds = seconds;
-    // A fresh countdown from this moment, so the first gap after a change is the length the
-    // operator just chose rather than the remainder of the old schedule.
-    this.reschedule(seconds);
-
-    this.logger.info({ intervalSeconds: seconds }, 'Wayback recording interval changed');
-    return seconds;
-  }
-
-  /** Restart the sample timer with a fresh countdown. No-op unless the recorder is running. */
-  private reschedule(seconds: number): void {
-    if (this.sampleTimer === null) return;
-
-    clearInterval(this.sampleTimer);
-    this.sampleTimer = setInterval(() => {
-      void this.observe();
-    }, seconds * 1_000);
-    this.sampleTimer.unref();
   }
 
   // -------------------------------------------------------------------------
@@ -383,6 +296,9 @@ export class PlayerHistoryService {
       retentionDays: this.retentionDays,
       sampleIntervalSeconds: this.cadenceSeconds,
       now,
+      // Custom ranges are the timeline's zoom level, so they resolve to the finest bucket the
+      // configured cadence and the point cap allow. Preset windows keep their chart buckets.
+      customBucketSeconds: waybackBucketSeconds,
     });
 
     const parameters = { anchor, bucket: bucketSeconds, from, to };

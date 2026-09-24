@@ -56,6 +56,11 @@ function niceBucketCeiling(seconds: number): number {
   return multiplier * magnitude;
 }
 
+/** The smallest multiple of `multiple` that is at least `value`. */
+function roundUpToMultiple(value: number, multiple: number): number {
+  return Math.max(multiple, Math.ceil(value / multiple) * multiple);
+}
+
 /** Choose a bounded custom-range bucket while retaining familiar buckets for ranges up to 30d. */
 export function customHistoryBucketSeconds(
   spanSeconds: number,
@@ -69,6 +74,27 @@ export function customHistoryBucketSeconds(
   if (tier !== undefined) return Math.max(interval, tier.bucketSeconds);
 
   return Math.max(interval, niceBucketCeiling(span / HISTORY_MAX_POINTS));
+}
+
+/**
+ * Bucket size for an explicit wayback range.
+ *
+ * Wayback is scrubbed rather than read as a chart, so its custom ranges are the zoom level: a
+ * two-minute view must expose the configured observations instead of one 60-second column. This
+ * therefore picks the finest bucket the point cap allows — always a whole multiple of the
+ * recording cadence, so buckets line up with observations and never subdivide them — while wide
+ * ranges keep the familiar chart tiers whenever those are already within the cap.
+ */
+export function waybackBucketSeconds(spanSeconds: number, sampleIntervalSeconds: number): number {
+  const span = Number.isFinite(spanSeconds) ? Math.max(1, Math.ceil(spanSeconds)) : 1;
+  const interval = Number.isFinite(sampleIntervalSeconds)
+    ? Math.max(1, Math.ceil(sampleIntervalSeconds))
+    : 1;
+  const fitted = niceBucketCeiling(span / HISTORY_MAX_POINTS);
+  const tier = CUSTOM_BUCKET_TIERS.find(({ maximumSpan }) => span <= maximumSpan);
+  const baseline = tier === undefined ? fitted : Math.min(tier.bucketSeconds, fitted);
+
+  return roundUpToMultiple(baseline, interval);
 }
 
 /** A validated range, with the bucket grid every point in the response was folded onto. */
@@ -103,7 +129,16 @@ export function resolveHistoryRange(
     kind: 'window',
     window: DEFAULT_HISTORY_WINDOW,
   },
-  options: { retentionDays: number; sampleIntervalSeconds: number; now?: number },
+  options: {
+    retentionDays: number;
+    sampleIntervalSeconds: number;
+    now?: number;
+    /**
+     * Custom-range bucketing. Defaults to the shared chart tiers; the wayback map passes
+     * {@link waybackBucketSeconds} so its custom ranges are the zoom level rather than a chart.
+     */
+    customBucketSeconds?: (spanSeconds: number, sampleIntervalSeconds: number) => number;
+  },
 ): ResolvedHistoryRange {
   const selection: HistorySelection =
     typeof requested === 'string' ? { kind: 'window', window: requested } : requested;
@@ -124,10 +159,11 @@ export function resolveHistoryRange(
     throw new RangeError('History range exceeds the configured retention period.');
   }
 
+  const customBucket = options.customBucketSeconds ?? customHistoryBucketSeconds;
   const bucketSeconds =
     selection.kind === 'window'
       ? BUCKET_SECONDS[selection.window]
-      : customHistoryBucketSeconds(spanSeconds, options.sampleIntervalSeconds);
+      : customBucket(spanSeconds, options.sampleIntervalSeconds);
 
   return {
     selection,

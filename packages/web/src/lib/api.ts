@@ -23,8 +23,6 @@ import type {
   ShutdownRequest,
   StatusResponse,
   UnbanRequest,
-  WaybackSettingsRequest,
-  WaybackSettingsResponse,
 } from '@palsentry/shared';
 
 /** An error returned by the PalSentry API, carrying the machine-readable code. */
@@ -152,10 +150,6 @@ function post<T>(path: string, body?: unknown): Promise<T> {
   });
 }
 
-function put<T>(path: string, body: unknown): Promise<T> {
-  return request<T>(path, { method: 'PUT', body: JSON.stringify(body) });
-}
-
 /**
  * A history selection as query parameters.
  *
@@ -197,8 +191,6 @@ export const api = {
 
   playerHistory: (selection: HistorySelection) =>
     request<PlayerHistoryResponse>(`/player-history?${historySearch(selection)}`),
-  updateWaybackSettings: (body: WaybackSettingsRequest) =>
-    put<WaybackSettingsResponse>('/player-history/settings', body),
 
   bans: () => request<BansResponse>('/bans'),
   deleteBan: (id: number) => request<void>(`/bans/${id}`, { method: 'DELETE' }),

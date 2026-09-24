@@ -3,7 +3,10 @@ import { fileURLToPath } from 'node:url';
 import {
   DEFAULT_MAP_PROJECTION,
   DEFAULT_MAP_TEXTURE_URL,
+  DEFAULT_WAYBACK_INTERVAL_SECONDS,
   DEFAULT_WORLD_TREE_TEXTURE_URL,
+  MAX_WAYBACK_INTERVAL_SECONDS,
+  MIN_WAYBACK_INTERVAL_SECONDS,
   type MapMeta,
   type MapProjection,
 } from '@palsentry/shared';
@@ -88,6 +91,14 @@ export interface AppConfig {
   history: {
     retentionDays: number;
     sampleIntervalSeconds: number;
+    /**
+     * How often wayback records player positions.
+     *
+     * Deployment configuration rather than a dashboard setting: the useful cadence is a property
+     * of the server and its storage, and an operator should not have to log in to change how much
+     * history their database accumulates.
+     */
+    waybackIntervalSeconds: number;
   };
   map: MapMeta;
   restart: {
@@ -265,6 +276,11 @@ const envSchema = z.object({
   PALSENTRY_ALLOW_DESTRUCTIVE: envBool(true),
   PALSENTRY_HISTORY_RETENTION_DAYS: envInt(30, 1, 3650),
   PALSENTRY_SAMPLE_INTERVAL_SECONDS: envInt(60, 5, 3600),
+  PALSENTRY_WAYBACK_INTERVAL_SECONDS: envInt(
+    DEFAULT_WAYBACK_INTERVAL_SECONDS,
+    MIN_WAYBACK_INTERVAL_SECONDS,
+    MAX_WAYBACK_INTERVAL_SECONDS,
+  ),
   PALSENTRY_RESTART_WAIT_SECONDS: envInt(30, 0, 3600),
   PALSENTRY_RESTART_HEALTH_TIMEOUT_SECONDS: envInt(180, 10, 1800),
   PALSENTRY_RESTART_POLL_INTERVAL_MS: envInt(2_000, 250, 30_000),
@@ -534,6 +550,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     history: {
       retentionDays: parsed.PALSENTRY_HISTORY_RETENTION_DAYS,
       sampleIntervalSeconds: parsed.PALSENTRY_SAMPLE_INTERVAL_SECONDS,
+      waybackIntervalSeconds: parsed.PALSENTRY_WAYBACK_INTERVAL_SECONDS,
     },
     map: {
       projection: mapProjection,

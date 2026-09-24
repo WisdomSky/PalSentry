@@ -55,14 +55,15 @@ export function createContext(config: AppConfig, logger: Logger): AppContext {
     retentionDays: config.history.retentionDays,
   });
 
-  // Records at its own persisted cadence rather than the metric sampling interval: position
-  // detail is what makes a replay useful, and it is the operator who knows how much detail the
-  // current investigation needs.
+  // Records at its own configured cadence rather than the metric sampling interval: position
+  // detail is what makes a replay useful, and the operator who tunes it is the one who knows how
+  // much detail the server should accumulate.
   const playerHistory = new PlayerHistoryService({
     db,
     players,
     logger,
     retentionDays: config.history.retentionDays,
+    intervalSeconds: config.history.waybackIntervalSeconds,
   });
 
   return {

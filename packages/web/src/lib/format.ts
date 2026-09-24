@@ -77,15 +77,40 @@ export function formatRelative(iso: string | null, now = Date.now()): string {
   return `${Math.round(absolute / 86_400)}d ${suffix}`;
 }
 
+/**
+ * Options shared by the history timestamp formatters.
+ *
+ * Minute precision is the right default: a metric bucket is minutes wide, so seconds would be
+ * noise. The wayback timeline, though, can be zoomed until two observations share a minute — and
+ * there the seconds are the only thing telling them apart.
+ */
+export interface TimestampFormatOptions {
+  /** Include seconds. Off by default, because most history is bucketed coarser than a minute. */
+  seconds?: boolean;
+  /**
+   * Force the date onto an axis label.
+   *
+   * The default is to add it once a span exceeds a day, which leaves a 24-hour view whose two ends
+   * straddle midnight labelled `12:03` and `12:03`. Callers that know their range crosses a day
+   * boundary can say so instead of relying on the span.
+   */
+  date?: boolean;
+}
+
 /** Timeline label for a history chart: clock time, plus the date once a span exceeds a day. */
-export function formatChartTime(unixSeconds: number, spanSeconds: number): string {
+export function formatChartTime(
+  unixSeconds: number,
+  spanSeconds: number,
+  options: TimestampFormatOptions = {},
+): string {
   const date = new Date(unixSeconds * 1000);
   if (Number.isNaN(date.getTime())) return '—';
-  const longSpan = Number.isFinite(spanSeconds) && spanSeconds > 86_400;
+  const longSpan = options.date === true || (Number.isFinite(spanSeconds) && spanSeconds > 86_400);
   return date.toLocaleString(undefined, {
     ...(longSpan ? { month: 'short', day: '2-digit' } : {}),
     hour: '2-digit',
     minute: '2-digit',
+    ...(options.seconds === true ? { second: '2-digit' } : {}),
     hour12: false,
   });
 }
@@ -96,7 +121,10 @@ export function formatChartTime(unixSeconds: number, spanSeconds: number): strin
  * Chart tooltips name one exact bucket, so unlike the axis labels this always carries the date and
  * the weekday — at which point the year is the only part that would be noise.
  */
-export function formatChartTimestamp(unixSeconds: number): string {
+export function formatChartTimestamp(
+  unixSeconds: number,
+  options: TimestampFormatOptions = {},
+): string {
   const date = new Date(unixSeconds * 1000);
   if (Number.isNaN(date.getTime())) return '—';
   return date.toLocaleString(undefined, {
@@ -105,6 +133,7 @@ export function formatChartTimestamp(unixSeconds: number): string {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
+    ...(options.seconds === true ? { second: '2-digit' } : {}),
     hour12: false,
   });
 }
@@ -114,15 +143,22 @@ export function formatChartTimestamp(unixSeconds: number): string {
  *
  * The conversion goes through the browser's `Date`, so the operator's own timezone and any DST
  * boundary are handled locally. The server only ever sees whole Unix seconds.
+ *
+ * `seconds` mode exists for the wayback timeline, whose viewport can be panned to any second: a
+ * minute-precision input would round the range on display and make the field look edited the
+ * moment a gesture moved it. Callers using it must also set `step="1"` on the input, or the
+ * browser reports the seconds-bearing value as a step mismatch.
  */
-export function unixSecondsToLocalInput(seconds: number): string {
+export function unixSecondsToLocalInput(
+  seconds: number,
+  options: TimestampFormatOptions = {},
+): string {
   const date = new Date(seconds * 1000);
   if (Number.isNaN(date.getTime())) return '';
   const pad = (value: number): string => String(value).padStart(2, '0');
-  return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
-    `T${pad(date.getHours())}:${pad(date.getMinutes())}`
-  );
+  const clock = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const time = options.seconds === true ? `${clock}:${pad(date.getSeconds())}` : clock;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${time}`;
 }
 
 /**

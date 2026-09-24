@@ -1,7 +1,5 @@
 import {
   DEFAULT_HISTORY_WINDOW,
-  WAYBACK_INTERVAL_OPTIONS,
-  isWaybackInterval,
   type HistorySelection,
   type HistoryWindow,
 } from '@palsentry/shared';
@@ -158,23 +156,6 @@ export function historyQuerySchema(
       return { kind: 'window', window: query.window ?? defaultWindow };
     });
 }
-
-/**
- * The wayback recording cadence.
- *
- * Strict about the offered values rather than accepting any positive integer: the cadence is a
- * request rate against the game server and a storage rate against SQLite, and an operator typing
- * `1` into a number field should be told the choices rather than quietly sampling every second
- * forever.
- */
-export const waybackSettingsSchema = z.object({
-  intervalSeconds: z
-    .number({ error: 'intervalSeconds must be a number of seconds.' })
-    .int('intervalSeconds must be a whole number of seconds.')
-    .refine(isWaybackInterval, {
-      error: `intervalSeconds must be one of ${WAYBACK_INTERVAL_OPTIONS.join(', ')} seconds.`,
-    }),
-});
 
 export const auditQuerySchema = z.object({
   action: z.string().trim().max(50).optional(),
