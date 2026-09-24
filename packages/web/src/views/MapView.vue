@@ -476,8 +476,8 @@ const waybackRows = computed(() => [...scene.value].sort((a, b) => a.name.locale
         <div class="min-w-0">
           <h2 class="card-title">Replay</h2>
           <p class="text-xs text-slate-500 dark:text-slate-400">
-            Drag to pan through time, pinch or Ctrl/Cmd+wheel to zoom, and click or press an arrow
-            key to hold a moment.
+            Drag to pan through time, scroll to zoom, and click or press an arrow key to hold a
+            moment.
           </p>
         </div>
 
@@ -538,23 +538,23 @@ const waybackRows = computed(() => [...scene.value].sort((a, b) => a.name.locale
             @update:range="changeWaybackViewport"
           />
 
-          <p
-            v-if="history.refreshing.value && history.error.value === null"
-            class="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400"
-            role="status"
-          >
-            <LoaderCircle class="h-3 w-3 animate-spin" aria-hidden="true" />
-            {{ historyStale ? 'Loading this range…' : 'Refreshing…' }}
-          </p>
+          <!--          <p-->
+          <!--            v-if="history.refreshing.value && history.error.value === null"-->
+          <!--            class="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400"-->
+          <!--            role="status"-->
+          <!--          >-->
+          <!--            <LoaderCircle class="h-3 w-3 animate-spin" aria-hidden="true" />-->
+          <!--            {{ historyStale ? 'Loading this range…' : 'Refreshing…' }}-->
+          <!--          </p>-->
 
-          <p
-            v-else-if="historyEmpty"
-            class="rounded-lg border border-dashed border-slate-300 px-3 py-6 text-center text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400"
-          >
-            Nothing was recorded in this range. PalSentry records positions every
-            {{ formatInterval(server.waybackIntervalSeconds) }} while it is running — a gap this
-            long usually means it was not.
-          </p>
+          <!--          <p-->
+          <!--            v-else-if="historyEmpty"-->
+          <!--            class="rounded-lg border border-dashed border-slate-300 px-3 py-6 text-center text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400"-->
+          <!--          >-->
+          <!--            Nothing was recorded in this range. PalSentry records positions every-->
+          <!--            {{ formatInterval(server.waybackIntervalSeconds) }} while it is running — a gap this-->
+          <!--            long usually means it was not.-->
+          <!--          </p>-->
         </template>
       </div>
 

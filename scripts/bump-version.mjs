@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Bump every place PalSentry's version is written, and repoint the README's download buttons.
+ * Bump every place PalSentry's version is written, and repoint the README's download buttons at the
+ * matching release assets.
  *
  * The version is not one value in one file. The desktop package names the release tag and therefore
  * the update feed, the server reports `APP_VERSION` through `/api/health` and `/api/meta`, and the
@@ -41,31 +42,18 @@ const APP_VERSION = /APP_VERSION\s*=\s*'([^']+)'/;
 
 /**
  * The installers the README offers. `artifact` is the name GitHub publishes, which is the name
- * electron-builder writes with its spaces turned into dashes.
+ * electron-builder writes with its spaces turned into dashes, and `label` is what matches a button
+ * in the README to its artifact.
  */
 const DOWNLOADS = [
-  {
-    label: 'Windows',
-    artifact: (version) => `PalSentry-Setup-${version}.exe`,
-    colour: '0078D6',
-    logo: 'windows',
-    logoColour: 'white',
-  },
-  {
-    label: 'macOS',
-    artifact: (version) => `PalSentry-${version}-arm64.dmg`,
-    colour: '000000',
-    logo: 'apple',
-    logoColour: 'white',
-  },
-  {
-    label: 'Linux',
-    artifact: (version) => `PalSentry-${version}.AppImage`,
-    colour: 'FCC624',
-    logo: 'linux',
-    logoColour: 'black',
-  },
+  { label: 'Windows', artifact: (version) => `PalSentry-Setup-${version}.exe` },
+  { label: 'macOS', artifact: (version) => `PalSentry-${version}-arm64.dmg` },
+  { label: 'Linux', artifact: (version) => `PalSentry-${version}.AppImage` },
 ];
+
+function downloadUrl(download, version) {
+  return `https://github.com/${REPO}/releases/download/v${version}/${download.artifact(version)}`;
+}
 
 function read(relative) {
   return readFileSync(path.join(repoRoot, relative), 'utf8');
@@ -139,24 +127,6 @@ function surfaces() {
   ];
 }
 
-function downloadBlock(version) {
-  const lines = DOWNLOADS.map(({ label, artifact, colour, logo, logoColour }) => {
-    const name = artifact(version);
-    // shields.io separates the label, the message and the colour with dashes, so a literal dash in
-    // the artifact's name has to be doubled.
-    const badge =
-      `https://img.shields.io/badge/${label}-${name.replace(/-/g, '--')}-${colour}` +
-      `?logo=${logo}&logoColor=${logoColour}`;
-    const link = `https://github.com/${REPO}/releases/download/v${version}/${name}`;
-
-    return `[![${label}](${badge})](${link})`;
-  });
-
-  // Prettier puts a blank line between an HTML comment and the block it wraps, so the generated
-  // block matches what `npm run lint` expects rather than being reformatted on the next commit.
-  return [DOWNLOAD_START, '', ...lines, '', DOWNLOAD_END].join('\n');
-}
-
 function replaceDownloadBlock(contents, version) {
   const start = contents.indexOf(DOWNLOAD_START);
   const end = contents.indexOf(DOWNLOAD_END);
@@ -166,7 +136,33 @@ function replaceDownloadBlock(contents, version) {
     );
   }
 
-  return `${contents.slice(0, start)}${downloadBlock(version)}${contents.slice(end + DOWNLOAD_END.length)}`;
+  // The buttons are hand-made artwork (`images/download-windows.png`), so a bump leaves the image
+  // markdown exactly as written and rewrites only where each button points. Everything else in the
+  // block — spacing, line breaks, comments — survives untouched, which keeps the diff to the three
+  // URLs.
+  const block = contents.slice(start + DOWNLOAD_START.length, end);
+  const matched = new Set();
+  const updated = block.replace(
+    /\[!\[([^\]]+)\]\(([^)]+)\)\]\(([^)]+)\)/g,
+    (button, label, image, link) => {
+      const download = DOWNLOADS.find((candidate) => candidate.label === label);
+      if (download === undefined) return button;
+
+      matched.add(label);
+      if (link === downloadUrl(download, version)) return button;
+      return `[![${label}](${image})](${downloadUrl(download, version)})`;
+    },
+  );
+
+  const missing = DOWNLOADS.filter((download) => !matched.has(download.label));
+  if (missing.length > 0) {
+    throw new Error(
+      `${README}'s download block has no ${missing.map((d) => d.label).join(', ')} button; ` +
+        'restore it before bumping',
+    );
+  }
+
+  return `${contents.slice(0, start + DOWNLOAD_START.length)}${updated}${contents.slice(end)}`;
 }
 
 function usage() {
