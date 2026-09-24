@@ -19,7 +19,7 @@ import { usePolling } from '@/composables/usePolling';
 import { usePlayerHistory } from '@/composables/usePlayerHistory';
 import { api, errorMessage } from '@/lib/api';
 import { resolveMapMeta } from '@/lib/map-display';
-import { formatInterval } from '@/lib/format';
+// import { formatInterval } from '@/lib/format';
 import { waybackMarkersAt } from '@/lib/wayback';
 import EmptyState from '@/components/EmptyState.vue';
 import OfflineBanner from '@/components/OfflineBanner.vue';
