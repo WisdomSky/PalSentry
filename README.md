@@ -19,7 +19,9 @@ PalSentry is available as a desktop app for macOS, Windows and Linux. Download t
 your platform and open it — every release is also listed on
 [GitHub Releases](https://github.com/WisdomSky/PalSentry/releases).
 
-[![Windows](images/download-windows.png)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.1/PalSentry-Setup-1.2.1.exe) [![macOS](images/download-macos.png)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.1/PalSentry-1.2.1-arm64.dmg) [![Linux](images/download-linux.png)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.1/PalSentry-1.2.1.AppImage)
+<!-- downloads:start -->
+[![Windows](images/download-windows.png)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.2/PalSentry-Setup-1.2.2.exe) [![macOS](images/download-macos.png)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.2/PalSentry-1.2.2-arm64.dmg) [![Linux](images/download-linux.png)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.2/PalSentry-1.2.2.AppImage)
+<!-- downloads:end -->
 
 > [!NOTE]
 > macOS builds are unsigned, so Gatekeeper blocks the first launch: open **System Settings → Privacy
@@ -86,7 +88,7 @@ The map keeps the selected player in view even when they travel long distances o
 
 #### Wayback Mode
 
-PalSentry records where players are as it runs, so the map can be replayed instead of only showing the present. The **Wayback map** button on the World map opens the last 24 hours: scrub the timeline and each dot moves to the position recorded for that moment, showing only the players who were online in it. Positions are recorded every 5 seconds by default; set `PALSENTRY_WAYBACK_INTERVAL_SECONDS` to trade trail detail for database size.
+PalSentry records where players are as it runs, so the map can be replayed instead of only showing the present. The **Wayback map** button on the World map opens the last 24 hours: scrub the timeline and each dot moves to the position recorded for that moment, showing only the players who were online in it.
 
 ![Wayback Mode](screenshots/3.3-livemap-replay.png)
 

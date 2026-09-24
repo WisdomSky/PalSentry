@@ -5,4 +5,4 @@
  * file-resolution dependency on a path that changes between `tsx` and `tsup` output.
  * Bump alongside the root `package.json` version.
  */
-export const APP_VERSION = '1.2.1';
+export const APP_VERSION = '1.2.2';
