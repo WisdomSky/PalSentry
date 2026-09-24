@@ -20,6 +20,7 @@ your platform and open it — every release is also listed on
 [GitHub Releases](https://github.com/WisdomSky/PalSentry/releases).
 
 <!-- downloads:start -->
+
 [![Windows](images/download-windows.png)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.2/PalSentry-Setup-1.2.2.exe) [![macOS](images/download-macos.png)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.2/PalSentry-1.2.2-arm64.dmg) [![Linux](images/download-linux.png)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.2/PalSentry-1.2.2.AppImage)
 <!-- downloads:end -->
 
