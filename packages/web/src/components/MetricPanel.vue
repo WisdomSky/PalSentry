@@ -45,6 +45,8 @@ const pollIntervalMs = computed(() => Math.max(sampleIntervalSeconds.value, 1) *
 const { response, error, loading, refreshing, reload } = useMetricHistory(
   selection,
   pollIntervalMs,
+  // Only the players-online chart plots names, so only it asks the server to look them up.
+  { includePlayers: props.metric === 'onlinePlayers' },
 );
 
 function updateSelection(next: HistorySelection): void {
@@ -53,7 +55,14 @@ function updateSelection(next: HistorySelection): void {
 
 const points = computed(
   () =>
-    response.value?.samples.map((sample) => ({ ts: sample.ts, value: props.value(sample) })) ?? [],
+    response.value?.samples.map((sample) => ({
+      ts: sample.ts,
+      value: props.value(sample),
+      // A missing field means no observation was recorded; an empty list means the observation saw
+      // nobody online. The chart says different things for each, so the distinction is carried
+      // through rather than flattened.
+      ...(sample.onlinePlayers === undefined ? {} : { names: sample.onlinePlayers }),
+    })) ?? [],
 );
 
 const rangeLabel = computed(() => {

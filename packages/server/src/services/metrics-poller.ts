@@ -24,6 +24,13 @@ import { resolveHistoryRange } from './history-range.js';
 
 interface HistoryRow {
   bucket_ts: number;
+  /**
+   * Newest sample inside the bucket.
+   *
+   * Not part of the response: it is the anchor for the optional online-name lookup, because the
+   * names should describe the moment the bucket's own data ends at rather than its start.
+   */
+  last_ts: number;
   serverfps: number;
   currentplayernum: number;
   maxplayernum: number;
@@ -213,6 +220,10 @@ export class MetricsPoller {
    * Aggregation happens in SQL rather than in the browser so a long retention period does not
    * ship tens of thousands of rows over the wire. Averages are used for rates and `MAX` for the
    * counters that represent high-water marks within the bucket.
+   *
+   * `includePlayers` additionally names who was online in each bucket. It costs one indexed lookup
+   * per bucket, so it is opt-in rather than part of every history response: only the Players online
+   * chart shows names, and the other three charts should not pay for them.
    */
   history(
     requested: HistorySelection | HistoryWindow = {
@@ -220,6 +231,7 @@ export class MetricsPoller {
       window: DEFAULT_HISTORY_WINDOW,
     },
     now: number = Date.now(),
+    options: { includePlayers?: boolean } = {},
   ): HistoryResponse {
     const { selection, window, from, to, bucketSeconds, anchor } = resolveHistoryRange(requested, {
       retentionDays: this.retentionDays,
@@ -231,6 +243,7 @@ export class MetricsPoller {
       .prepare(
         `SELECT
            @anchor + CAST((ts - @anchor) / @bucket AS INTEGER) * @bucket AS bucket_ts,
+           MAX(ts)             AS last_ts,
            AVG(serverfps)        AS serverfps,
            AVG(currentplayernum) AS currentplayernum,
            MAX(maxplayernum)     AS maxplayernum,
@@ -245,17 +258,26 @@ export class MetricsPoller {
       )
       .all({ anchor, bucket: bucketSeconds, from, to }) as HistoryRow[];
 
-    const samples: HistorySample[] = rows.map((row) => ({
-      ts: row.bucket_ts,
-      serverfps: Math.round(row.serverfps),
-      currentplayernum: Math.round(row.currentplayernum),
-      maxplayernum: row.maxplayernum,
-      // One decimal is plenty for a millisecond frame time and keeps the payload small.
-      serverframetime: Math.round(row.serverframetime * 10) / 10,
-      uptime: row.uptime,
-      basecampnum: Math.round(row.basecampnum),
-      days: row.days,
-    }));
+    const names = options.includePlayers === true ? this.namesByBucket(rows) : null;
+
+    const samples: HistorySample[] = rows.map((row) => {
+      const sample: HistorySample = {
+        ts: row.bucket_ts,
+        serverfps: Math.round(row.serverfps),
+        currentplayernum: Math.round(row.currentplayernum),
+        maxplayernum: row.maxplayernum,
+        // One decimal is plenty for a millisecond frame time and keeps the payload small.
+        serverframetime: Math.round(row.serverframetime * 10) / 10,
+        uptime: row.uptime,
+        basecampnum: Math.round(row.basecampnum),
+        days: row.days,
+      };
+
+      const online = names?.get(row.bucket_ts);
+      if (online !== undefined) sample.onlinePlayers = online;
+
+      return sample;
+    });
 
     return {
       selection,
@@ -265,6 +287,55 @@ export class MetricsPoller {
       bucketSeconds,
       samples,
     };
+  }
+
+  /**
+   * Who was online at the end of each bucket, from the wayback recorder's observations.
+   *
+   * The position history is the only record PalSentry keeps of *who* was connected at a moment;
+   * `metric_samples` counts them but does not know their names. Both tables belong to this database
+   * and the recorder writes every cadence step, so a bucket's newest sample has an observation
+   * within seconds of it.
+   *
+   * The lookup is deliberately confined to the bucket: a bucket that covers an outage — or one
+   * older than the recorder's history — is left out entirely rather than attributing the last
+   * roster seen before the gap to it. Synthesised pre-upgrade rows are excluded for the same reason
+   * they are excluded from the timeline: this service never observed them.
+   *
+   * A bucket whose observation saw nobody maps to an empty list, which is a different fact from a
+   * bucket with no observation at all.
+   */
+  private namesByBucket(rows: readonly HistoryRow[]): Map<number, string[]> {
+    // The LEFT JOIN is what separates the two cases: no observation yields no row at all, while an
+    // observation of an empty world yields one row whose name is NULL. DISTINCT collapses two
+    // accounts that share a display name, which is all the chart can show anyway.
+    const statement = this.db.prepare(
+      `SELECT DISTINCT p.name AS name
+         FROM (SELECT s.id
+                 FROM player_position_snapshots s
+                WHERE s.captured_at >= @bucketStart
+                  AND s.captured_at <= @upto
+                  AND s.synthetic = 0
+                ORDER BY s.captured_at DESC
+                LIMIT 1) observed
+         LEFT JOIN player_positions p ON p.snapshot_id = observed.id
+        ORDER BY p.name`,
+    );
+
+    const byBucket = new Map<number, string[]>();
+    for (const row of rows) {
+      const found = statement.all({ bucketStart: row.bucket_ts, upto: row.last_ts }) as {
+        name: string | null;
+      }[];
+      if (found.length === 0) continue;
+
+      byBucket.set(
+        row.bucket_ts,
+        found.map((entry) => entry.name).filter((name): name is string => name !== null),
+      );
+    }
+
+    return byBucket;
   }
 
   /** Total samples stored, for diagnostics. */

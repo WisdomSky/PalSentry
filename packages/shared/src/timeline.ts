@@ -157,3 +157,39 @@ export function nearestTimestamp(values: readonly number[], target: number): num
   if (previous === null) return candidate;
   return target - previous <= candidate - target ? previous : candidate;
 }
+
+/**
+ * Where playback begins when play is pressed.
+ *
+ * Wayback opens on the live tail, where there is nothing ahead to play, so that case starts from
+ * the oldest loaded observation rather than stopping on the first tick. Anywhere else the playhead
+ * itself is the starting point: the moment already on screen is not skipped, and the first step
+ * advances from it.
+ */
+export function playbackStartIndex(currentIndex: number | null, lastIndex: number): number {
+  const last = Math.max(0, Math.floor(finiteOr(lastIndex, 0)));
+  if (currentIndex === null) return 0;
+
+  const index = Math.floor(finiteOr(currentIndex, 0));
+  return index <= 0 || index >= last ? 0 : index;
+}
+
+/**
+ * The index one playback step lands on, or null when the step would pass the loaded observations.
+ *
+ * Null is the caller's cue to load more history — or, at the live edge where there is none yet, to
+ * hold on the newest observation until the next one is recorded. A step never lands between two
+ * observations: the returned index is always a real one, or nothing at all.
+ */
+export function nextPlaybackIndex(
+  currentIndex: number,
+  steps: number,
+  lastIndex: number,
+): number | null {
+  const last = Math.max(0, Math.floor(finiteOr(lastIndex, 0)));
+  const index = Math.min(last, Math.max(0, Math.floor(finiteOr(currentIndex, 0))));
+  const advance = Math.max(1, Math.floor(finiteOr(steps, 1)));
+  const next = index + advance;
+
+  return next > last ? null : next;
+}

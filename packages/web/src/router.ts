@@ -68,7 +68,26 @@ export const router = createRouter({
   // History mode: requires the server's SPA fallback, which `buildApp` provides.
   history: createWebHistory(),
   routes,
-  scrollBehavior: () => ({ top: 0 }),
+  /**
+   * Where the page should be after a navigation.
+   *
+   * The case that matters day to day is the second one: the wayback timeline writes the instant it
+   * is replaying into the URL once a second, and that is a navigation like any other. Scrolling to
+   * the top for it would throw the operator out of the view they scrolled to — on a small screen,
+   * out of the map they are watching — once per second.
+   *
+   * Restoring a scroll position for back/forward is deliberately not attempted: every view mounts
+   * its content asynchronously, so at the moment this runs the document is still viewport-height
+   * and any position below the top is clamped away. Landing at the top is the honest result until
+   * the views reserve the room they are going to fill.
+   */
+  scrollBehavior: (to, from) => {
+    // A query change is state inside the view already on screen — the replayed instant, a range, a
+    // tracked player — rather than a move between views, so it leaves the operator where they are.
+    if (to.path === from.path) return false;
+    // Landing on a different page still starts at its top.
+    return { top: 0 };
+  },
 });
 
 router.beforeEach(async (to) => {

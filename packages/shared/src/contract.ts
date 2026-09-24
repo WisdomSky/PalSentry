@@ -378,6 +378,16 @@ export interface HistorySample {
   uptime: number;
   basecampnum: number;
   days: number;
+  /**
+   * Names recorded as online at the observation nearest this bucket's newest sample.
+   *
+   * Present only when the request asked for names (`players=true`) and the wayback recorder holds
+   * an observation inside the bucket. An empty list means that observation saw nobody; a missing
+   * field means there is no observation to name, which a bucket covering an outage has and a
+   * bucket over a live server does not. The list can be shorter than `currentplayernum`, which is
+   * a bucket average rather than a single reading.
+   */
+  onlinePlayers?: string[];
 }
 
 export interface HistoryResponse {
@@ -418,6 +428,16 @@ export const DEFAULT_WAYBACK_INTERVAL_SECONDS = MIN_WAYBACK_INTERVAL_SECONDS;
 
 /** Wayback opens on the last day: long enough to cover a session, small enough to draw. */
 export const DEFAULT_WAYBACK_WINDOW: HistoryWindow = '24h';
+
+/**
+ * Point budget for the wayback timeline.
+ *
+ * The timeline's columns *are* its steps — hovering, clicking, and arrowing all move one column at
+ * a time — so bucket size is what an operator feels. Twice the chart budget keeps a 5-second
+ * cadence exact out to an hour, which is the window a chase actually happens in, while still
+ * bounding a response that carries every player's position in every bucket.
+ */
+export const WAYBACK_MAX_POINTS = 720;
 
 /**
  * One successful background observation.

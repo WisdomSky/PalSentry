@@ -157,6 +157,21 @@ export function historyQuerySchema(
     });
 }
 
+/**
+ * Optional extras a history request can ask for.
+ *
+ * Separate from {@link historyQuerySchema} because that schema describes *which* range to read and
+ * is shared by both history endpoints, while these describe *what else* to put in the response.
+ * Only the metrics endpoint acts on them; the wayback map has no use for a roster it already
+ * draws.
+ */
+export const historyOptionsSchema = z
+  .object({
+    /** Include the names recorded online in each bucket, from the wayback position history. */
+    players: z.enum(['true', 'false']).optional(),
+  })
+  .transform((query) => ({ includePlayers: query.players === 'true' }));
+
 export const auditQuerySchema = z.object({
   action: z.string().trim().max(50).optional(),
   actor: z.string().trim().max(200).optional(),

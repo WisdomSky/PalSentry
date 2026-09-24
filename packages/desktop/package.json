@@ -2,7 +2,7 @@
   "name": "palsentrydesktop",
   "productName": "PalSentry",
   "desktopName": "palsentry.desktop",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "private": true,
   "description": "PalSentry desktop app for macOS, Windows and Linux",
   "author": "PalSentry <wisdomsky@users.noreply.github.com>",

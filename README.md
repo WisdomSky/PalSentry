@@ -21,7 +21,7 @@ your platform and open it — every release is also listed on
 
 <!-- downloads:start -->
 
-[![Windows](images/download-windows.png)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.3/PalSentry-Setup-1.2.3.exe) [![macOS](images/download-macos.png)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.3/PalSentry-1.2.3-arm64.dmg) [![Linux](images/download-linux.png)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.3/PalSentry-1.2.3.AppImage)
+[![Windows](images/download-windows.png)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.4/PalSentry-Setup-1.2.4.exe) [![macOS](images/download-macos.png)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.4/PalSentry-1.2.4-arm64.dmg) [![Linux](images/download-linux.png)](https://github.com/WisdomSky/PalSentry/releases/download/v1.2.4/PalSentry-1.2.4.AppImage)
 <!-- downloads:end -->
 
 > [!NOTE]
@@ -89,9 +89,9 @@ The map keeps the selected player in view even when they travel long distances o
 
 #### Wayback Mode
 
-PalSentry records where players are as it runs, so the map can be replayed instead of only showing the present. The **Wayback map** button on the World map opens the last 24 hours: scrub the timeline and each dot moves to the position recorded for that moment, showing only the players who were online in it. Drag the timeline to pan through history.
+PalSentry records where players are as it runs, so the map can be replayed instead of only showing the present. The **Wayback map** button on the World map opens the last 24 hours: scrub the timeline and each dot moves to the position recorded for that moment, showing only the players who were online in it. Drag the timeline to pan through history, scroll to zoom until individual observations appear, or press play to replay the range on its own — the speed control sets how many observations pass each second.
 
-![Wayback Mode](screenshots/3.3-livemap-replay.png)
+![Wayback Mode](screenshots/3.4-livemap-replay.gif)
 
 ### Enhanced Server Tools
 
