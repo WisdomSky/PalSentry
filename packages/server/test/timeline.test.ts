@@ -4,7 +4,9 @@ import {
   clampTimelineRange,
   minimumTimelineSpanSeconds,
   nearestTimestamp,
+  nextPlaybackIndex,
   panTimelineRange,
+  playbackStartIndex,
   timelineContains,
   timelineFractionAt,
   timelineSpan,
@@ -246,5 +248,58 @@ describe('nearestTimestamp', () => {
   it('handles a single value and a non-finite target', () => {
     assert.equal(nearestTimestamp([42], 900), 42);
     assert.equal(nearestTimestamp(values, Number.NaN), 100);
+  });
+});
+
+describe('playbackStartIndex', () => {
+  it('starts from the oldest observation when the live tail is being followed', () => {
+    assert.equal(playbackStartIndex(null, 9), 0);
+  });
+
+  it('starts from the oldest observation when the playhead is already at the end', () => {
+    assert.equal(playbackStartIndex(9, 9), 0);
+  });
+
+  it('keeps a playhead that has somewhere to go', () => {
+    assert.equal(playbackStartIndex(4, 9), 4);
+    assert.equal(playbackStartIndex(1, 9), 1);
+    assert.equal(playbackStartIndex(0, 9), 0);
+  });
+
+  it('stays total for a single observation and unusable input', () => {
+    assert.equal(playbackStartIndex(null, 0), 0);
+    assert.equal(playbackStartIndex(0, 0), 0);
+    assert.equal(playbackStartIndex(-3, 9), 0);
+    assert.equal(playbackStartIndex(40, 9), 0);
+    assert.equal(playbackStartIndex(Number.NaN, 9), 0);
+    assert.equal(playbackStartIndex(2, Number.NaN), 0);
+  });
+});
+
+describe('nextPlaybackIndex', () => {
+  it('advances one observation at a time at the base speed', () => {
+    assert.equal(nextPlaybackIndex(0, 1, 9), 1);
+    assert.equal(nextPlaybackIndex(8, 1, 9), 9);
+  });
+
+  it('skips columns at faster speeds without leaving the data', () => {
+    assert.equal(nextPlaybackIndex(0, 2, 9), 2);
+    assert.equal(nextPlaybackIndex(0, 4, 9), 4);
+    assert.equal(nextPlaybackIndex(5, 4, 9), 9);
+  });
+
+  it('reports the end of the loaded range instead of inventing an instant', () => {
+    assert.equal(nextPlaybackIndex(9, 1, 9), null);
+    assert.equal(nextPlaybackIndex(4, 4, 7), null);
+    assert.equal(nextPlaybackIndex(0, 1, 0), null);
+  });
+
+  it('stays total for unusable input', () => {
+    assert.equal(nextPlaybackIndex(3, 0, 9), 4);
+    assert.equal(nextPlaybackIndex(3, -2, 9), 4);
+    assert.equal(nextPlaybackIndex(3, Number.NaN, 9), 4);
+    assert.equal(nextPlaybackIndex(-4, 1, 9), 1);
+    assert.equal(nextPlaybackIndex(40, 1, 9), null);
+    assert.equal(nextPlaybackIndex(0, 1, Number.NaN), null);
   });
 });

@@ -155,8 +155,14 @@ function post<T>(path: string, body?: unknown): Promise<T> {
  *
  * Shared by the metric charts and the wayback map: both ask the same endpoint-shaped question,
  * and the server validates both with the same rules, so the encoding lives in one place.
+ *
+ * `includePlayers` asks the server to name who was online in each bucket, which costs it one lookup
+ * per bucket. Only the players-online chart wants that, so it is off unless asked for.
  */
-function historySearch(selection: HistorySelection): string {
+function historySearch(
+  selection: HistorySelection,
+  options: { includePlayers?: boolean } = {},
+): string {
   const search = new URLSearchParams();
   if (selection.kind === 'window') {
     search.set('window', selection.window);
@@ -165,6 +171,7 @@ function historySearch(selection: HistorySelection): string {
     search.set('from', String(selection.from));
     search.set('to', String(selection.to));
   }
+  if (options.includePlayers === true) search.set('players', 'true');
   return search.toString();
 }
 
@@ -186,8 +193,8 @@ export const api = {
   players: () => request<PlayersResponse>('/players'),
   bases: (refresh = false) => request<BasesResponse>(`/bases${refresh ? '?refresh=true' : ''}`),
   settings: () => request<SettingsResponse>('/settings'),
-  history: (selection: HistorySelection) =>
-    request<HistoryResponse>(`/history?${historySearch(selection)}`),
+  history: (selection: HistorySelection, options?: { includePlayers?: boolean }) =>
+    request<HistoryResponse>(`/history?${historySearch(selection, options)}`),
 
   playerHistory: (selection: HistorySelection) =>
     request<PlayerHistoryResponse>(`/player-history?${historySearch(selection)}`),

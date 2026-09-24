@@ -296,9 +296,10 @@ export class PlayerHistoryService {
       retentionDays: this.retentionDays,
       sampleIntervalSeconds: this.cadenceSeconds,
       now,
-      // Custom ranges are the timeline's zoom level, so they resolve to the finest bucket the
-      // configured cadence and the point cap allow. Preset windows keep their chart buckets.
-      customBucketSeconds: waybackBucketSeconds,
+      // Every wayback range is the timeline's zoom level, so it resolves to the finest bucket the
+      // configured cadence and the wayback point budget allow — presets included: the last hour
+      // deserves the same detail whether it was chosen from the list or dragged into view.
+      bucketSeconds: waybackBucketSeconds,
     });
 
     const parameters = { anchor, bucket: bucketSeconds, from, to };

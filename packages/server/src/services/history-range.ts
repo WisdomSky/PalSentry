@@ -1,6 +1,7 @@
 import {
   DEFAULT_HISTORY_WINDOW,
   HISTORY_MAX_POINTS,
+  WAYBACK_MAX_POINTS,
   type HistorySelection,
   type HistoryWindow,
 } from '@palsentry/shared';
@@ -8,11 +9,13 @@ import {
 /**
  * Turning a requested history range into the boundaries and bucket size a query needs.
  *
- * Both time series PalSentry keeps — metric samples and, later, player positions — answer the same
+ * Both time series PalSentry keeps — metric samples and player positions — answer the same
  * question ("what happened between these two instants, at a resolution the browser can draw?"),
- * so the rules live here rather than being duplicated per service. The numbers are deliberately
- * shared: a chart and a map showing the same range should agree on how much detail that range
- * deserves.
+ * so the rules live here rather than being duplicated per service. What differs is the budget:
+ * a chart is read, so its buckets only need to be as fine as the graph is wide, while the wayback
+ * timeline is scrubbed, so its buckets are also its steps and deserve as much detail as the
+ * payload can carry. Either way the widest range resolves to a bounded number of buckets, which is
+ * what keeps both drawable.
  */
 
 /** Window definitions in seconds. */
@@ -39,7 +42,7 @@ const BUCKET_SECONDS: Record<HistoryWindow, number> = {
   '30d': 7200,
 };
 
-const CUSTOM_BUCKET_TIERS: readonly { maximumSpan: number; bucketSeconds: number }[] = [
+const BUCKET_TIERS: readonly { maximumSpan: number; bucketSeconds: number }[] = [
   { maximumSpan: WINDOW_SECONDS['1h'], bucketSeconds: BUCKET_SECONDS['1h'] },
   { maximumSpan: WINDOW_SECONDS['6h'], bucketSeconds: BUCKET_SECONDS['6h'] },
   { maximumSpan: WINDOW_SECONDS['24h'], bucketSeconds: BUCKET_SECONDS['24h'] },
@@ -61,40 +64,41 @@ function roundUpToMultiple(value: number, multiple: number): number {
   return Math.max(multiple, Math.ceil(value / multiple) * multiple);
 }
 
-/** Choose a bounded custom-range bucket while retaining familiar buckets for ranges up to 30d. */
-export function customHistoryBucketSeconds(
-  spanSeconds: number,
-  sampleIntervalSeconds: number,
-): number {
+/**
+ * Bucket size for a chart, or any range read rather than scrubbed.
+ *
+ * Familiar buckets for ranges up to 30 days — the same hour looks the same on every reload — and a
+ * bounded bucket beyond them. Buckets are never finer than the sample interval, since that would
+ * only interleave empty buckets, which is why this is also the strategy preset windows use.
+ */
+export function chartBucketSeconds(spanSeconds: number, sampleIntervalSeconds: number): number {
   const span = Number.isFinite(spanSeconds) ? Math.max(1, Math.ceil(spanSeconds)) : 1;
   const interval = Number.isFinite(sampleIntervalSeconds)
     ? Math.max(1, Math.ceil(sampleIntervalSeconds))
     : 1;
-  const tier = CUSTOM_BUCKET_TIERS.find(({ maximumSpan }) => span <= maximumSpan);
+  const tier = BUCKET_TIERS.find(({ maximumSpan }) => span <= maximumSpan);
   if (tier !== undefined) return Math.max(interval, tier.bucketSeconds);
 
   return Math.max(interval, niceBucketCeiling(span / HISTORY_MAX_POINTS));
 }
 
 /**
- * Bucket size for an explicit wayback range.
+ * Bucket size for the wayback timeline, whatever form its selection takes.
  *
- * Wayback is scrubbed rather than read as a chart, so its custom ranges are the zoom level: a
- * two-minute view must expose the configured observations instead of one 60-second column. This
- * therefore picks the finest bucket the point cap allows — always a whole multiple of the
- * recording cadence, so buckets line up with observations and never subdivide them — while wide
- * ranges keep the familiar chart tiers whenever those are already within the cap.
+ * Wayback is scrubbed rather than read as a chart, so its ranges are a zoom level: a two-minute
+ * view must expose the configured observations instead of one 60-second column. This therefore
+ * picks the finest bucket {@link WAYBACK_MAX_POINTS} allows — always a whole multiple of the
+ * recording cadence, so buckets line up with observations and never subdivide them — and applies
+ * to preset windows exactly as it does to custom ranges, because the last hour deserves the same
+ * detail whether it was chosen from the list or dragged into view.
  */
 export function waybackBucketSeconds(spanSeconds: number, sampleIntervalSeconds: number): number {
   const span = Number.isFinite(spanSeconds) ? Math.max(1, Math.ceil(spanSeconds)) : 1;
   const interval = Number.isFinite(sampleIntervalSeconds)
     ? Math.max(1, Math.ceil(sampleIntervalSeconds))
     : 1;
-  const fitted = niceBucketCeiling(span / HISTORY_MAX_POINTS);
-  const tier = CUSTOM_BUCKET_TIERS.find(({ maximumSpan }) => span <= maximumSpan);
-  const baseline = tier === undefined ? fitted : Math.min(tier.bucketSeconds, fitted);
 
-  return roundUpToMultiple(baseline, interval);
+  return roundUpToMultiple(niceBucketCeiling(span / WAYBACK_MAX_POINTS), interval);
 }
 
 /** A validated range, with the bucket grid every point in the response was folded onto. */
@@ -134,10 +138,12 @@ export function resolveHistoryRange(
     sampleIntervalSeconds: number;
     now?: number;
     /**
-     * Custom-range bucketing. Defaults to the shared chart tiers; the wayback map passes
-     * {@link waybackBucketSeconds} so its custom ranges are the zoom level rather than a chart.
+     * Bucketing strategy, applied to preset and custom selections alike.
+     *
+     * Defaults to {@link chartBucketSeconds}; the wayback map passes
+     * {@link waybackBucketSeconds} so its ranges are the zoom level rather than a chart.
      */
-    customBucketSeconds?: (spanSeconds: number, sampleIntervalSeconds: number) => number;
+    bucketSeconds?: (spanSeconds: number, sampleIntervalSeconds: number) => number;
   },
 ): ResolvedHistoryRange {
   const selection: HistorySelection =
@@ -159,11 +165,8 @@ export function resolveHistoryRange(
     throw new RangeError('History range exceeds the configured retention period.');
   }
 
-  const customBucket = options.customBucketSeconds ?? customHistoryBucketSeconds;
-  const bucketSeconds =
-    selection.kind === 'window'
-      ? BUCKET_SECONDS[selection.window]
-      : customBucket(spanSeconds, options.sampleIntervalSeconds);
+  const bucketStrategy = options.bucketSeconds ?? chartBucketSeconds;
+  const bucketSeconds = bucketStrategy(spanSeconds, options.sampleIntervalSeconds);
 
   return {
     selection,

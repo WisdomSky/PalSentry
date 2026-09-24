@@ -58,6 +58,36 @@ function insertSample(
     .run({ ts, ...value });
 }
 
+/**
+ * Record one wayback observation: the only place PalSentry stores *who* was online.
+ *
+ * Names are given in insertion order, and each gets its own userid, so two accounts can
+deliberately share a display name.
+ */
+function insertObservation(
+  testApp: TestApp,
+  ts: number,
+  names: readonly string[],
+  options: { synthetic?: boolean } = {},
+): void {
+  const inserted = testApp.ctx.db
+    .prepare(
+      'INSERT INTO player_position_snapshots (captured_at, player_count, synthetic) VALUES (?, ?, ?)',
+    )
+    .run(ts, names.length, options.synthetic === true ? 1 : 0);
+
+  const snapshotId = Number(inserted.lastInsertRowid);
+  const insertPosition = testApp.ctx.db.prepare(
+    `INSERT INTO player_positions
+       (snapshot_id, captured_at, userid, name, level, location_x, location_y)
+     VALUES (?, ?, ?, ?, 1, 0, 0)`,
+  );
+
+  names.forEach((name, index) => {
+    insertPosition.run(snapshotId, ts, `USER-${index}-${name}`, name);
+  });
+}
+
 describe('MetricsPoller.sample', () => {
   it('stores a sample read from the game server', async () => {
     const testApp = await makeApp();
@@ -313,6 +343,83 @@ describe('MetricsPoller.history', () => {
   });
 });
 
+describe('MetricsPoller.history online names', () => {
+  it('omits names unless the request asks for them', async () => {
+    const testApp = await makeApp();
+    insertSample(testApp, BASE);
+    insertObservation(testApp, BASE, ['Alice']);
+
+    const history = testApp.ctx.metrics.history('1h', (BASE + HOUR) * 1000);
+
+    assert.equal(history.samples.length, 1);
+    assert.equal(
+      'onlinePlayers' in (history.samples[0] as HistorySample),
+      false,
+      'a chart that shows no names is not charged for the lookups',
+    );
+  });
+
+  it('names who was online at the newest sample of each bucket', async () => {
+    const testApp = await makeApp();
+
+    // Two samples land in the first 60s bucket, and two observations land before them. The names
+    // must describe the moment the bucket's data ends at, so the 30s observation wins over the
+    // one at 0s, and two accounts sharing a display name collapse to one entry.
+    insertSample(testApp, BASE);
+    insertSample(testApp, BASE + 45);
+    insertObservation(testApp, BASE, ['Carol']);
+    insertObservation(testApp, BASE + 30, ['Bob', 'Alice', 'Alice']);
+
+    // The next bucket has one sample and an observation that saw nobody: an empty world is a fact
+    // worth reporting, and an empty list says exactly that.
+    insertSample(testApp, BASE + 60);
+    insertObservation(testApp, BASE + 60, []);
+
+    const history = testApp.ctx.metrics.history('1h', (BASE + HOUR) * 1000, {
+      includePlayers: true,
+    });
+
+    assert.equal(history.bucketSeconds, 60);
+    assert.deepEqual(
+      history.samples.map((sample) => sample.onlinePlayers),
+      [['Alice', 'Bob'], []],
+      'sorted, each name once, and honestly empty where nobody was online',
+    );
+  });
+
+  it('says nothing about a bucket with no observation inside it', async () => {
+    const testApp = await makeApp();
+    insertSample(testApp, BASE);
+    // The recorder was down: the nearest observation is ten minutes old and belongs to another
+    // bucket, so attributing that roster to this bucket would be a guess.
+    insertObservation(testApp, BASE - 600, ['Alice']);
+
+    const history = testApp.ctx.metrics.history('1h', (BASE + HOUR) * 1000, {
+      includePlayers: true,
+    });
+
+    assert.deepEqual(
+      history.samples.map((sample) => 'onlinePlayers' in sample),
+      [false],
+    );
+  });
+
+  it('ignores observations this service never made', async () => {
+    const testApp = await makeApp();
+    insertSample(testApp, BASE);
+    insertObservation(testApp, BASE, ['Alice'], { synthetic: true });
+
+    const history = testApp.ctx.metrics.history('1h', (BASE + HOUR) * 1000, {
+      includePlayers: true,
+    });
+
+    assert.deepEqual(
+      history.samples.map((sample) => 'onlinePlayers' in sample),
+      [false],
+    );
+  });
+});
+
 describe('GET /api/history', () => {
   it('requires authentication', async () => {
     const { app } = await makeApp();
@@ -420,5 +527,43 @@ describe('GET /api/history', () => {
     const history = response.json<HistoryResponse>();
     assert.equal(history.samples.length, 1);
     assert.equal(history.samples[0]?.serverfps, 58);
+  });
+
+  it('returns online names only when they are requested', async () => {
+    const testApp = await makeApp();
+    const { app } = testApp;
+    const cookie = await signIn(app);
+
+    insertSample(testApp, BASE);
+    insertObservation(testApp, BASE, ['Alice', 'Bob']);
+
+    const plain = await app.inject({
+      method: 'GET',
+      url: `/api/history?from=${BASE}&to=${BASE + 60}`,
+      headers: { cookie },
+    });
+    assert.deepEqual(plain.json<HistoryResponse>().samples[0]?.onlinePlayers, undefined);
+
+    const named = await app.inject({
+      method: 'GET',
+      url: `/api/history?from=${BASE}&to=${BASE + 60}&players=true`,
+      headers: { cookie },
+    });
+    assert.equal(named.statusCode, 200);
+    assert.deepEqual(named.json<HistoryResponse>().samples[0]?.onlinePlayers, ['Alice', 'Bob']);
+  });
+
+  it('rejects a malformed players flag', async () => {
+    const { app } = await makeApp();
+    const cookie = await signIn(app);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/history?window=1h&players=maybe',
+      headers: { cookie },
+    });
+
+    assert.equal(response.statusCode, 400);
+    assert.equal(response.json().error.code, 'validation');
   });
 });

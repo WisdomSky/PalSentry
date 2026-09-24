@@ -6,6 +6,13 @@ import { formatChartTime, formatChartTimestamp } from '@/lib/format';
 interface ChartPoint {
   ts: number;
   value: number;
+  /**
+   * Who was recorded online at this point, when the metric has rosters to show.
+   *
+   * Absent means nothing was recorded; an empty array means the observation saw nobody, which is
+   * worth saying rather than leaving the tooltip silent.
+   */
+  names?: string[];
 }
 
 const props = withDefaults(
@@ -50,6 +57,12 @@ const SPARSE_DOT_LIMIT = 64;
 const AXIS_CHAR_PX = 6.2;
 /** Approximate height of the hover tooltip, used to decide whether it flips below the point. */
 const TOOLTIP_HEIGHT = 46;
+/** Added to that estimate when the tooltip also lists names, which wraps onto several lines. */
+const TOOLTIP_NAMES_HEIGHT = 40;
+/** Half the width reserved for a plain tooltip when keeping it inside the plot. */
+const TOOLTIP_HALF_WIDTH = 92;
+/** Half the width reserved when names make the tooltip wider. */
+const TOOLTIP_NAMES_HALF_WIDTH = 150;
 
 const container = ref<HTMLElement | null>(null);
 const width = ref(0);
@@ -204,6 +217,8 @@ const active = computed(() => {
     y: view.y(point.value),
     valueLabel: `${point.value}${props.unit}`,
     timeLabel: formatChartTimestamp(point.ts),
+    // Undefined when the metric has no rosters at all, which reads differently from an empty one.
+    names: point.names,
   };
 });
 
@@ -212,11 +227,14 @@ const tooltip = computed(() => {
   const view = chart.value;
   if (point === null || view === null) return null;
 
-  // Keep the tooltip inside the card; half its width is reserved on each side.
-  const half = 92;
+  // Keep the tooltip inside the card; a tooltip that lists names is wider than a plain one, so
+  // each reserves its own half-width.
+  const half = point.names === undefined ? TOOLTIP_HALF_WIDTH : TOOLTIP_NAMES_HALF_WIDTH;
   const left = Math.min(Math.max(point.x, half), Math.max(half, view.width - half));
-  // Flip below the point when there is not enough room above it for the tooltip.
-  const below = point.y < TOOLTIP_HEIGHT + 16;
+  // Flip below the point when there is not enough room above it for the tooltip, which a list of
+  // names makes taller.
+  const estimatedHeight = TOOLTIP_HEIGHT + (point.names === undefined ? 0 : TOOLTIP_NAMES_HEIGHT);
+  const below = point.y < estimatedHeight + 16;
 
   return {
     style: {
@@ -225,6 +243,21 @@ const tooltip = computed(() => {
       transform: below ? 'translate(-50%, 0)' : 'translate(-50%, -100%)',
     },
   };
+});
+
+/** The hovered point as one sentence, for the live region and anyone not looking at the tooltip. */
+const readout = computed(() => {
+  const point = active.value;
+  if (point === null) return '';
+
+  const online =
+    point.names === undefined
+      ? ''
+      : point.names.length === 0
+        ? ', nobody online'
+        : `, online: ${point.names.join(', ')}`;
+
+  return `${point.timeLabel}: ${point.valueLabel}${online}`;
 });
 
 /** Index of the sample nearest the pointer, following x only — that is how line charts are read. */
@@ -484,19 +517,27 @@ const accessibleLabel = computed(() => {
 
         <div
           v-if="active && tooltip"
-          class="pointer-events-none absolute z-10 rounded-lg border border-slate-200 bg-white/95 px-2 py-1 text-[11px] whitespace-nowrap shadow-lg dark:border-slate-700 dark:bg-slate-900/95"
+          class="pointer-events-none absolute z-10 max-w-xs rounded-lg border border-slate-200 bg-white/95 px-2 py-1 text-[11px] shadow-lg dark:border-slate-700 dark:bg-slate-900/95"
           :style="tooltip.style"
         >
           <p class="font-semibold text-slate-800 tabular-nums dark:text-slate-100">
             {{ active.valueLabel }}
           </p>
           <p class="text-slate-500 tabular-nums dark:text-slate-400">{{ active.timeLabel }}</p>
+          <!--
+            Names are a point-in-time roster, not the bucket's average: the list can be shorter or
+            longer than the number above it, so it is labelled rather than presented as a sum.
+          -->
+          <p
+            v-if="active.names !== undefined"
+            class="mt-1 border-t border-slate-200 pt-1 text-slate-500 dark:border-slate-700 dark:text-slate-400"
+          >
+            {{ active.names.length === 0 ? 'Nobody online' : active.names.join(', ') }}
+          </p>
         </div>
       </div>
 
-      <p class="sr-only" aria-live="polite">
-        {{ active ? `${active.timeLabel}: ${active.valueLabel}` : '' }}
-      </p>
+      <p class="sr-only" aria-live="polite">{{ readout }}</p>
     </div>
   </div>
 </template>

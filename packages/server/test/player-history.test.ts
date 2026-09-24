@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import type { PalworldPlayer } from '@palsentry/shared';
-import { DEFAULT_WAYBACK_INTERVAL_SECONDS } from '@palsentry/shared';
+import { DEFAULT_WAYBACK_INTERVAL_SECONDS, WAYBACK_MAX_POINTS } from '@palsentry/shared';
 import type { AppContext } from '../src/context.js';
 import type { PlayerSnapshot } from '../src/services/players.js';
 import { createTestApp, signIn, type TestApp } from './helpers/test-app.js';
@@ -279,7 +279,9 @@ describe('PlayerHistoryService history', () => {
   });
 
   it('folds several observations into one bucket and keeps the latest', async () => {
-    const testApp = await newApp();
+    // A one-minute cadence is the coarsest reading this test needs: three observations inside one
+    // minute have to collapse into the single column that minute gets.
+    const testApp = await newApp({ PALSENTRY_WAYBACK_INTERVAL_SECONDS: '60' });
     const { ctx } = testApp;
 
     observeAt(ctx, BASE, 0, [player('USER-A', 'Alice', 1, 1)]);
@@ -288,7 +290,7 @@ describe('PlayerHistoryService history', () => {
 
     const history = ctx.playerHistory.history('1h', NOW_MS);
 
-    assert.equal(history.bucketSeconds, 60, 'preset windows keep their chart buckets');
+    assert.equal(history.bucketSeconds, 60, 'a bucket is never finer than the readings it holds');
     assert.equal(history.snapshots.length, 1, 'one tick per bucket');
     assert.equal(history.snapshots[0]?.ts, BASE + 20, 'the tick names a real observation');
     assert.equal(history.snapshots[0]?.playerCount, 1);
@@ -323,19 +325,44 @@ describe('PlayerHistoryService history', () => {
     );
   });
 
-  it('coarsens a custom range only as far as the point cap requires', async () => {
+  it('keeps a preset at the recording cadence for the range a chase happens in', async () => {
     const testApp = await newApp();
     const { ctx } = testApp;
 
-    // An hour of five-second observations is 720 instants: twice the cap, so the bucket must be a
-    // cadence multiple that brings the response back under it.
-    const hour = ctx.playerHistory.history({ kind: 'range', from: BASE, to: BASE + 3_600 });
-    assert.equal(hour.bucketSeconds, 10);
-    assert.ok(Math.ceil(3_600 / hour.bucketSeconds) <= 360);
+    // An hour of five-second observations is exactly the wayback budget: a preset window shows
+    // each recorded instant rather than folding the hour into sixty columns.
+    const hour = ctx.playerHistory.history('1h', NOW_MS);
+    assert.equal(hour.bucketSeconds, 5);
+    assert.equal(Math.ceil(3_600 / hour.bucketSeconds), WAYBACK_MAX_POINTS);
 
-    const day = ctx.playerHistory.history({ kind: 'range', from: BASE, to: BASE + 86_400 });
-    assert.ok(day.bucketSeconds % 5 === 0, 'wide ranges still bucket on cadence multiples');
-    assert.ok(Math.ceil(86_400 / day.bucketSeconds) <= 360);
+    const sixHours = ctx.playerHistory.history('6h', NOW_MS);
+    assert.equal(sixHours.bucketSeconds, 50);
+    assert.ok(sixHours.bucketSeconds % 5 === 0, 'buckets stay on cadence multiples');
+    assert.ok(Math.ceil(21_600 / sixHours.bucketSeconds) <= WAYBACK_MAX_POINTS);
+  });
+
+  it('coarsens a day only as far as the wayback point budget requires', async () => {
+    const testApp = await newApp();
+    const { ctx } = testApp;
+
+    const day = ctx.playerHistory.history('24h', NOW_MS);
+    assert.equal(day.bucketSeconds, 200, 'a day is 432 columns, not one per five seconds');
+    assert.ok(Math.ceil(86_400 / day.bucketSeconds) <= WAYBACK_MAX_POINTS);
+
+    const month = ctx.playerHistory.history('30d', NOW_MS);
+    assert.ok(month.bucketSeconds % 5 === 0, 'wide ranges still bucket on cadence multiples');
+    assert.ok(Math.ceil(2_592_000 / month.bucketSeconds) <= WAYBACK_MAX_POINTS);
+  });
+
+  it('gives a custom range the detail its preset equivalent gets', async () => {
+    const testApp = await newApp();
+    const { ctx } = testApp;
+
+    const custom = ctx.playerHistory.history({ kind: 'range', from: BASE, to: BASE + 3_600 });
+    const preset = ctx.playerHistory.history('1h', NOW_MS);
+
+    assert.equal(custom.bucketSeconds, preset.bucketSeconds, 'the same hour, the same detail');
+    assert.equal(custom.bucketSeconds, 5);
   });
 
   it('honours a coarser configured cadence in a zoomed custom range', async () => {
@@ -508,7 +535,7 @@ describe('player history API', () => {
     assert.equal(response.statusCode, 200);
     const body = response.json() as { window: string; bucketSeconds: number; snapshots: unknown[] };
     assert.equal(body.window, '24h');
-    assert.equal(body.bucketSeconds, 300);
+    assert.equal(body.bucketSeconds, 200);
     assert.deepEqual(body.snapshots, []);
   });
 

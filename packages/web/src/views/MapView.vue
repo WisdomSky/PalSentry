@@ -192,14 +192,22 @@ function showWayback(): void {
   );
 }
 
-/** Pin the map to an instant recorded in the URL, so a chosen time can be shared. */
-function commitWaybackTime(ts: number): void {
+/**
+ * Pin the map to an instant recorded in the URL, so a chosen time can be shared.
+ *
+ * `replace` is how playback commits: it moves the pin once a second, and a replay should leave one
+ * history entry behind — where it started — rather than hundreds to back out of one at a time.
+ */
+function commitWaybackTime(ts: number, options: { replace?: boolean } = {}): void {
   previewAt.value = null;
   // Choosing the newest observation of a rolling window means "keep up with the server", not
   // "freeze here". Writing it down would leave the view pinned one interval behind the data with
   // nothing to say so. A fixed range cannot roll, so it always names the moment it replays.
   const follow = rollingWindow.value && ts === newestSnapshot.value;
-  updateWaybackQuery({ at: follow ? undefined : String(ts) }, { replace: false });
+  updateWaybackQuery(
+    { at: follow ? undefined : String(ts) },
+    { replace: options.replace ?? false },
+  );
 }
 
 /** Change the range. The pinned instant does not survive: it belonged to the old range. */
@@ -532,6 +540,8 @@ const waybackRows = computed(() => [...scene.value].sort((a, b) => a.name.locale
             :preview="previewAt"
             :retention-days="retentionDays"
             :interval-seconds="server.waybackIntervalSeconds"
+            :bucket-seconds="history.response.value?.bucketSeconds ?? null"
+            :rolling="rollingWindow"
             :class="historyStale ? 'opacity-40' : ''"
             @preview="previewAt = $event"
             @update:value="commitWaybackTime"

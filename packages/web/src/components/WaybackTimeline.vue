@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, useId, watch } from 'vue';
+import { Play, Square } from '@lucide/vue';
 import {
   minimumTimelineSpanSeconds,
   nearestTimestamp,
+  nextPlaybackIndex,
   panTimelineRange,
+  playbackStartIndex,
   timelineFractionAt,
   timelineSpan,
   timelineTimeAt,
@@ -12,6 +15,7 @@ import {
   type TimeRange,
   type WaybackSnapshot,
 } from '@palsentry/shared';
+import { usePolling } from '@/composables/usePolling';
 import { formatChartTime, formatChartTimestamp, formatInterval } from '@/lib/format';
 
 /**
@@ -30,6 +34,11 @@ import { formatChartTime, formatChartTimestamp, formatInterval } from '@/lib/for
  * The strip is a single `role="slider"` with the arrow/Home/End keys moving the playhead and
  * Shift+arrows plus the zoom buttons driving the viewport, so keyboard and screen-reader users get
  * the same control the mouse has instead of a decorative graphic.
+ *
+ * Playback replays the range without hands: a once-a-second tick walks the playhead to the next
+ * recorded observation, so the map, the positions table and the URL follow along exactly as they do
+ * when an observation is clicked. Speeds multiply how far each tick reaches; the tick itself never
+ * runs faster than a second, which is the pace at which a replay stays watchable.
  */
 const props = withDefaults(
   defineProps<{
@@ -55,13 +64,32 @@ const props = withDefaults(
     retentionDays: number;
     /** Recording cadence, which decides how close the timeline is allowed to zoom. */
     intervalSeconds: number;
+    /**
+     * Bucket size the server folded these observations into, when it reported one.
+     *
+     * A wide range cannot draw every recorded instant, so the server coarsens; the strip says so
+     * rather than letting a thinned-out view look like a quiet one.
+     */
+    bucketSeconds?: number | null;
+    /**
+     * True while the range is a rolling preset, which keeps gaining observations.
+     *
+     * A replay that has caught up with such a range waits for the next observation; a fixed range
+     * that has caught up has nothing left to play at all.
+     */
+    rolling?: boolean;
   }>(),
-  { pageStep: 10, preview: null },
+  { pageStep: 10, preview: null, bucketSeconds: null, rolling: false },
 );
 
 const emit = defineEmits<{
-  /** A committed instant. The parent owns what that means for the URL. */
-  'update:value': [number];
+  /**
+   * A committed instant. The parent owns what that means for the URL.
+   *
+   * `replace` asks for the URL to be rewritten in place rather than pushed: playback commits once a
+   * second, and a few hundred history entries nobody asked to step back through is not a feature.
+   */
+  'update:value': [ts: number, options?: { replace?: boolean }];
   /** A hovered/dragged instant, or null when the pointer left the strip. */
   preview: [number | null];
   /** A settled viewport, ready to become the range the parent loads. */
@@ -80,6 +108,10 @@ const WHEEL_PAGE_PX = 300;
 const ZOOM_STEP = 1.5;
 /** Shift+arrow pans by a quarter of the visible span, a readable step without losing the place. */
 const KEYBOARD_PAN_FRACTION = 0.25;
+/** Observations each playback tick advances. The tick is fixed at a second, so these are speeds. */
+const PLAYBACK_SPEEDS = [1, 2, 4] as const;
+/** One step per second: the slowest pace playback offers, and the floor it never goes below. */
+const PLAYBACK_TICK_MS = 1_000;
 
 const track = ref<HTMLElement | null>(null);
 const helpId = useId();
@@ -254,6 +286,177 @@ function playheadFraction(): number | null {
   return effectiveTs.value === null ? null : timelineFractionAt(range.value, effectiveTs.value);
 }
 
+// ---------------------------------------------------------------------------
+// Playback
+// ---------------------------------------------------------------------------
+
+const playing = ref(false);
+const speedIndex = ref(0);
+/** True while playback has asked for the next window of history and is waiting for it. */
+const awaitingRange = ref(false);
+/** The window playback paged to, so its data can be told apart from the range still on screen. */
+let pageRequest: TimeRange | null = null;
+
+/** Observations advanced per tick: 1x, 2x, 4x. */
+const speed = computed(() => PLAYBACK_SPEEDS[speedIndex.value] ?? 1);
+const canPlay = computed(() => props.snapshots.length > 1);
+const canSlowDown = computed(() => speedIndex.value > 0);
+const canSpeedUp = computed(() => speedIndex.value < PLAYBACK_SPEEDS.length - 1);
+
+/**
+ * The index of the committed instant among the observations currently loaded.
+ *
+ * Looked up on every tick rather than remembered, because a rolling window slides under the replay
+ * and a reloaded range replaces it outright; both would leave a cached index pointing at a moment
+ * the playhead is not on. When the pinned instant has been dropped from the window entirely, the
+ * nearest surviving observation is the closest thing to where the playhead was.
+ */
+function playheadIndex(): number | null {
+  const ts = props.value;
+  if (ts === null) return null;
+
+  const exact = props.snapshots.findIndex((snapshot) => snapshot.ts === ts);
+  if (exact !== -1) return exact;
+
+  const nearest = nearestTimestamp(snapshotTimes.value, ts);
+  return nearest === null ? null : props.snapshots.findIndex((snapshot) => snapshot.ts === nearest);
+}
+
+function stopPlayback(): void {
+  playing.value = false;
+  awaitingRange.value = false;
+  pageRequest = null;
+}
+
+/**
+ * True when the observations on screen belong to the viewport being asked for.
+ *
+ * A range change reaches the URL before its answer arrives, so both a replay and the strip's own
+ * gestures can be looking at the previous range's columns for a moment. Those columns cannot be
+ * stepped through: the first observation of a window cannot predate it, so one that does is the
+ * older data, and whichever it is, the answer already on its way will replace it.
+ */
+function dataMatchesViewport(): boolean {
+  const first = props.snapshots[0];
+  if (first === undefined) return true;
+  return first.ts >= props.from && first.ts <= props.to;
+}
+
+/**
+ * Ask for the next window of history, then keep playing there.
+ *
+ * Reaching the right edge has one of three meanings. A rolling window needs nothing: the poll
+ * slides it forward, so the replay waits for the next observation instead of asking for a range a
+ * preset cannot express. A window that can only be clamped forward is the present, where no more
+ * history exists — and a fixed range that has been read once will not grow — so that ends the
+ * replay. Otherwise the viewport pages forward by its own span, which keeps the strip's own
+ * clamping and makes the parent load that range.
+ */
+function pageForward(): void {
+  if (props.rolling) return;
+
+  const next = panTimelineRange(range.value, span.value, boundsNow(), minSpan.value);
+  // Only a window that starts where this one ends is new history. Anything less is the clamp
+  // against the present, which would replay the same observations backwards.
+  if (next.from < range.value.to) {
+    stopPlayback();
+    return;
+  }
+
+  pageRequest = next;
+  awaitingRange.value = true;
+  emit('update:range', next);
+}
+
+/**
+ * Carry on a replay that paged into the next window, once that window's own data is on screen.
+ *
+ * The range in the URL changes as soon as the page is requested, while the observations are still
+ * the previous window's until the answer lands. Those are told apart by containment: the first
+ * observation of the new window cannot predate it, so a first column that does is the old data and
+ * the replay waits. An empty window is a recording gap with nothing to replay, so it stops there.
+ */
+function resumeAfterPage(): void {
+  const requested = pageRequest;
+  if (!playing.value || requested === null) return;
+  if (props.from !== requested.from || props.to !== requested.to) return;
+
+  const first = props.snapshots[0];
+  if (first === undefined) {
+    stopPlayback();
+    return;
+  }
+  if (!dataMatchesViewport()) return;
+
+  pageRequest = null;
+  awaitingRange.value = false;
+  emit('update:value', first.ts, { replace: true });
+}
+
+/** One step of the replay: the next recorded observation, or the next window of them. */
+async function stepPlayback(): Promise<void> {
+  if (!playing.value || awaitingRange.value) return;
+
+  const snapshots = props.snapshots;
+  if (snapshots.length === 0) {
+    stopPlayback();
+    return;
+  }
+  // The answer for a range the operator has just left is not the range they are looking at.
+  if (!dataMatchesViewport()) return;
+
+  const index = playheadIndex();
+  // Nothing pinned means the newest observation is being followed: there is nothing ahead to step
+  // to until the server records something, so the tick waits rather than guessing at an end.
+  if (index === null) return;
+
+  const next = nextPlaybackIndex(index, speed.value, snapshots.length - 1);
+  if (next === null) {
+    pageForward();
+    return;
+  }
+
+  const snapshot = snapshots[next];
+  if (snapshot === undefined) return;
+  emit('update:value', snapshot.ts, { replace: true });
+}
+
+// The interval is the speed floor: while playing it is always one second, and `0` is how
+// `usePolling` is told to stop its timer entirely.
+usePolling(stepPlayback, {
+  intervalMs: computed(() => (playing.value && !awaitingRange.value ? PLAYBACK_TICK_MS : 0)),
+  immediate: false,
+});
+
+/** Start replaying, or stop it. Starting clears a hover preview so the replay owns the playhead. */
+function togglePlayback(): void {
+  if (playing.value) {
+    stopPlayback();
+    return;
+  }
+  if (!canPlay.value) return;
+
+  const index = playbackStartIndex(playheadIndex(), props.snapshots.length - 1);
+  const start = props.snapshots[index];
+  if (start === undefined) return;
+
+  emit('preview', null);
+  awaitingRange.value = false;
+  pageRequest = null;
+  // Play on the live tail means replaying the window from its beginning, and a replay that only
+  // moved a second later would look like it had not started at all.
+  if (index !== playheadIndex()) emit('update:value', start.ts, { replace: true });
+  playing.value = true;
+}
+
+function slowerPlayback(): void {
+  if (canSlowDown.value) speedIndex.value -= 1;
+}
+
+function fasterPlayback(): void {
+  if (canSpeedUp.value) speedIndex.value += 1;
+}
+
 function startPinch(): void {
   const [first, second] = [...pointers.values()];
   if (first === undefined || second === undefined) return;
@@ -292,6 +495,8 @@ function updatePinch(): void {
 
 function onPointerDown(event: PointerEvent): void {
   if (event.pointerType === 'mouse' && event.button !== 0) return;
+  // Touching the strip takes the replay back from the transport.
+  stopPlayback();
   const element = event.currentTarget as HTMLElement;
   element.setPointerCapture(event.pointerId);
   pointers.set(event.pointerId, event.clientX);
@@ -323,7 +528,9 @@ function onPointerDown(event: PointerEvent): void {
 
 function onPointerMove(event: PointerEvent): void {
   if (!pointers.has(event.pointerId)) {
-    // Hovering previews without touching the committed value or the URL.
+    // Hovering previews without touching the committed value or the URL — except while playing,
+    // where the playhead is the show and a passing mouse must not pull the map off it.
+    if (playing.value) return;
     const snapshot = snapshotAtClientX(event.clientX);
     emit('preview', snapshot === null ? null : snapshot.ts);
     return;
@@ -401,6 +608,10 @@ function onWheel(event: WheelEvent): void {
   const rect = track.value?.getBoundingClientRect();
   if (rect === undefined || rect.width <= 0) return;
 
+  // Zooming and panning by hand is direct manipulation, so it ends the replay; the zoom buttons
+  // are the deliberate way to change the view without losing the thread.
+  stopPlayback();
+
   const unit =
     event.deltaMode === WheelEvent.DOM_DELTA_LINE
       ? WHEEL_LINE_PX
@@ -450,8 +661,15 @@ function panByFraction(fraction: number): void {
 function onKeydown(event: KeyboardEvent): void {
   const page = Math.max(1, props.pageStep);
 
+  if (event.key === ' ') {
+    event.preventDefault();
+    togglePlayback();
+    return;
+  }
+
   if (event.shiftKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
     event.preventDefault();
+    stopPlayback();
     panByFraction(event.key === 'ArrowLeft' ? -KEYBOARD_PAN_FRACTION : KEYBOARD_PAN_FRACTION);
     return;
   }
@@ -469,10 +687,12 @@ function onKeydown(event: KeyboardEvent): void {
       return;
     case 'Home':
       event.preventDefault();
+      stopPlayback();
       commitIndex(0);
       return;
     case 'End':
       event.preventDefault();
+      stopPlayback();
       commitIndex(props.snapshots.length - 1);
       return;
   }
@@ -488,6 +708,8 @@ function onKeydown(event: KeyboardEvent): void {
   const move = moves[event.key];
   if (move === undefined) return;
   event.preventDefault();
+  // Choosing an observation by hand ends the replay: the operator is driving again.
+  stopPlayback();
   commitIndex(selectedIndex.value + move);
 }
 
@@ -509,14 +731,28 @@ const effectiveLabel = computed(() =>
 );
 
 /**
+ * The bucket the server had to use, when it is coarser than the recording cadence.
+ *
+ * Null while the answer is still on its way or when the range is fine enough for every
+ * observation, so the readout stays quiet in the ordinary case.
+ */
+const coarserBucket = computed(() => {
+  const bucket = props.bucketSeconds;
+  return bucket !== null && bucket > props.intervalSeconds ? bucket : null;
+});
+
+/**
  * Adopt the parent's range once it arrives.
  *
  * A gesture in flight keeps its own baseline: a rolling preset's props move with every poll, and
  * letting one land mid-drag would yank the viewport back under the operator's finger.
  */
 watch(
-  () => [props.from, props.to] as const,
+  () => [props.from, props.to, props.snapshots] as const,
   () => {
+    // A replay waiting on the next window resumes from this change; everything else here is about
+    // the viewport adopting what the parent has committed.
+    resumeAfterPage();
     if (interacting.value) return;
     localRange.value = null;
   },
@@ -550,6 +786,62 @@ onBeforeUnmount(clearCommitTimer);
         <button
           type="button"
           class="btn-secondary btn-xs px-1.5"
+          :disabled="!canPlay"
+          :aria-pressed="playing"
+          aria-label="Play the timeline"
+          :title="playing ? 'Stop playback' : 'Play the timeline'"
+          @click="togglePlayback"
+        >
+          <Square v-if="playing" class="h-3 w-3" aria-hidden="true" />
+          <Play v-else class="h-3 w-3" aria-hidden="true" />
+        </button>
+
+        <!-- Playback speed: observations advanced per second. The tick never runs faster. -->
+        <span class="ml-1 flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400">
+          speed
+          <button
+            type="button"
+            class="btn-secondary btn-xs px-1.5"
+            :disabled="!canSlowDown"
+            title="Slower playback"
+            aria-label="Slower playback"
+            @click="slowerPlayback"
+          >
+            <span aria-hidden="true">−</span>
+          </button>
+          <span
+            class="font-mono text-slate-700 tabular-nums dark:text-slate-200"
+            title="Observations shown per second"
+          >
+            {{ speed }}×
+          </span>
+          <button
+            type="button"
+            class="btn-secondary btn-xs px-1.5"
+            :disabled="!canSpeedUp"
+            title="Faster playback"
+            aria-label="Faster playback"
+            @click="fasterPlayback"
+          >
+            <span aria-hidden="true">+</span>
+          </button>
+        </span>
+      </div>
+      <div class="flex items-center gap-2">
+        <p class="font-mono text-[10px] text-slate-500 tabular-nums dark:text-slate-400">
+          {{ formatInterval(span) }} shown · {{ snapshots.length }}
+          {{ snapshots.length === 1 ? 'observation' : 'observations' }}
+          <!-- A range too wide to draw every instant is still honest about how much it is showing. -->
+          <span v-if="coarserBucket !== null"> · every {{ formatInterval(coarserBucket) }}</span>
+        </p>
+        <!--
+          Zooming belongs with the range it acts on, so it sits at the far end beside the readout
+          rather than between the play button and the speed it is set to. Having it last also keeps
+          the two buttons still: the readout is the part whose width changes as the range does.
+        -->
+        <button
+          type="button"
+          class="btn-secondary btn-xs px-1.5"
           :disabled="!canZoomIn"
           title="Zoom in"
           aria-label="Zoom in"
@@ -568,15 +860,11 @@ onBeforeUnmount(clearCommitTimer);
           <span aria-hidden="true">−</span>
         </button>
       </div>
-      <p class="font-mono text-[10px] text-slate-500 tabular-nums dark:text-slate-400">
-        {{ formatInterval(span) }} shown · {{ snapshots.length }}
-        {{ snapshots.length === 1 ? 'observation' : 'observations' }}
-      </p>
     </div>
 
     <p :id="helpId" class="sr-only">
       Drag to pan through time, scroll to zoom, and click to select a recorded moment. Shift and the
-      arrow keys pan, and plus and minus zoom.
+      arrow keys pan, plus and minus zoom, and Space plays or stops the replay.
     </p>
 
     <!-- The strip itself: one column per observation, plus the playhead. -->

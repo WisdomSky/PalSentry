@@ -17,6 +17,19 @@ export interface UseHistoryResourceResult<T> {
 }
 
 /**
+ * What a selection is, as a value the watcher can compare.
+ *
+ * The selection object is rebuilt whenever the route changes, and the pinned instant is part of the
+ * route: comparing identity would reload the entire range every time a replay moves the pin, which
+ * is once a second. Only a different window or pair of boundaries is a different request.
+ */
+function selectionKey(selection: HistorySelection): string {
+  return selection.kind === 'window'
+    ? `window:${selection.window}`
+    : `range:${selection.from}:${selection.to}`;
+}
+
+/**
  * One retention-bounded history range, loaded and kept current.
  *
  * Shared by the metric charts and the wayback map because the shape of the problem is identical:
@@ -84,8 +97,12 @@ export function useHistoryResource<T>(
   // error handling apply whether the trigger was the timer or a range change.
   usePolling(load, { intervalMs });
 
-  // Changing the range must not wait for the next poll tick.
-  watch(selection, () => void load(), { deep: true });
+  // Changing the range must not wait for the next poll tick. A republished selection with the same
+  // boundaries is not a change: the route rebuilt the object, the range did not move.
+  watch(
+    () => selectionKey(selection.value),
+    () => void load(),
+  );
 
   // Enabling after the fact has to load: the mount-time run was skipped, and showing the empty
   // state until the next tick would look like "no history" rather than "not asked yet".
