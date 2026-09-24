@@ -114,6 +114,13 @@ function onNavigate(): void {
         <RouterLink :to="{ name: 'dashboard' }" class="flex items-center gap-2">
           <Shield class="h-5 w-5 text-teal-600 dark:text-teal-400" aria-hidden="true" />
           <span class="text-sm font-semibold tracking-tight">PalSentry</span>
+          <span
+            v-if="server.meta !== null"
+            class="font-mono text-[10px] text-slate-400 dark:text-slate-500"
+            :title="`PalSentry ${server.meta.app.version}`"
+          >
+            v{{ server.meta.app.version }}
+          </span>
         </RouterLink>
 
         <div class="hidden min-w-0 flex-1 items-center gap-3 sm:flex">

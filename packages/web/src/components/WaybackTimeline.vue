@@ -70,11 +70,13 @@ const emit = defineEmits<{
 
 /** Pointer travel that turns a click into a pan, in pixels. */
 const PAN_THRESHOLD_PX = 4;
-/** How close to the playhead a press counts as grabbing it rather than panning the track. */
-const PLAYHEAD_GRAB_PX = 10;
 /** Wheel gestures have no release, so they commit once they stop arriving. */
 const WHEEL_COMMIT_MS = 200;
-const WHEEL_ZOOM_SENSITIVITY = 0.0015;
+/** One wheel notch (~100px) changes the span by about 1.28x, near the 1.5x button step. */
+const WHEEL_ZOOM_SENSITIVITY = 0.0025;
+/** Wheel deltas are pixels, lines or pages depending on the device; a notch is ~100px of travel. */
+const WHEEL_LINE_PX = 33;
+const WHEEL_PAGE_PX = 300;
 const ZOOM_STEP = 1.5;
 /** Shift+arrow pans by a quarter of the visible span, a readable step without losing the place. */
 const KEYBOARD_PAN_FRACTION = 0.25;
@@ -99,9 +101,8 @@ let gesture: {
   pointerId: number;
   startX: number;
   startRange: TimeRange;
-  /** False when the press grabbed the playhead, which scrubs instead of panning. */
-  panEligible: boolean;
-  mode: 'select' | 'pan';
+  /** A press starts as a tap; travelling past the threshold turns it into a pan. */
+  mode: 'tap' | 'pan';
 } | null = null;
 let pinch: { distance: number; midpoint: number; range: TimeRange } | null = null;
 let commitTimer: number | null = null;
@@ -241,8 +242,7 @@ function finishGesture(): void {
 }
 
 function zoomBy(factor: number): void {
-  const anchor =
-    effectiveTs.value === null ? 0.5 : timelineFractionAt(range.value, effectiveTs.value);
+  const anchor = playheadFraction() ?? 0.5;
   setRange(
     zoomTimelineRangeAt(range.value, span.value * factor, anchor, boundsNow(), minSpan.value),
   );
@@ -310,21 +310,14 @@ function onPointerDown(event: PointerEvent): void {
     return;
   }
 
-  const fraction = fractionAt(event.clientX);
-  const playhead = playheadFraction();
-  const width = element.getBoundingClientRect().width;
-  const grabbingPlayhead =
-    fraction !== null &&
-    playhead !== null &&
-    width > 0 &&
-    Math.abs(fraction - playhead) * width <= PLAYHEAD_GRAB_PX;
-
+  // Every press is pan-eligible: the release decides whether it was a drag or a click, so a press
+  // never has to guess whether it landed on the playhead. The hover preview parks that line under
+  // the pointer, which is exactly what made a strip full of observations impossible to pan.
   gesture = {
     pointerId: event.pointerId,
     startX: event.clientX,
     startRange: range.value,
-    panEligible: !grabbingPlayhead,
-    mode: 'select',
+    mode: 'tap',
   };
 }
 
@@ -348,9 +341,9 @@ function onPointerMove(event: PointerEvent): void {
   if (active === null || active.pointerId !== event.pointerId) return;
 
   const travelled = event.clientX - active.startX;
-  if (active.mode === 'select' && active.panEligible && Math.abs(travelled) > PAN_THRESHOLD_PX) {
-    // Past the threshold this is a drag of the background, not a click: pan, and drop the preview
-    // so the map stops following a moment the operator is no longer pointing at.
+  if (active.mode === 'tap' && Math.abs(travelled) > PAN_THRESHOLD_PX) {
+    // Past the threshold this is a pan, not a click: pan, and drop the preview so the map stops
+    // following a moment the operator is no longer pointing at.
     active.mode = 'pan';
     emit('preview', null);
   }
@@ -393,7 +386,7 @@ function onPointerUp(event: PointerEvent): void {
     return;
   }
 
-  // A tap, or a drag of the playhead: the release commits the observation under the pointer.
+  // A tap: the release commits the observation under the pointer. A pan returned above.
   const snapshot = snapshotAtClientX(event.clientX);
   if (last) finishGesture();
   if (snapshot !== null) emit('update:value', snapshot.ts);
@@ -408,28 +401,33 @@ function onWheel(event: WheelEvent): void {
   const rect = track.value?.getBoundingClientRect();
   if (rect === undefined || rect.width <= 0) return;
 
-  const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : 1;
+  const unit =
+    event.deltaMode === WheelEvent.DOM_DELTA_LINE
+      ? WHEEL_LINE_PX
+      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+        ? WHEEL_PAGE_PX
+        : 1;
   const fraction = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
-  const zooming = event.ctrlKey || event.metaKey;
+  // Ctrl/Cmd is the browser's own zoom, so it always zooms. Shift and a sideways trackpad swipe
+  // are the horizontal-scroll gestures, which mean "move through time" on a timeline.
   const horizontal =
-    !zooming && (event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY));
+    !event.ctrlKey &&
+    !event.metaKey &&
+    (event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY));
 
-  if (zooming) {
-    // Scrolling up (negative delta) magnifies, matching the map and the zoom-in button: a smaller
-    // span is a closer look. The factor is inverted against the map's camera scale because here the
-    // span, not the scale, is the zoom level.
-    const factor = Math.exp(event.deltaY * unit * WHEEL_ZOOM_SENSITIVITY);
-    setRange(
-      zoomTimelineRangeAt(range.value, span.value * factor, fraction, boundsNow(), minSpan.value),
-    );
-  } else if (horizontal) {
+  if (horizontal) {
     const delta = (event.deltaX !== 0 ? event.deltaX : event.deltaY) * unit;
     setRange(
       panTimelineRange(range.value, (delta / rect.width) * span.value, boundsNow(), minSpan.value),
     );
   } else {
-    // A plain vertical wheel belongs to the page: this card scrolls like every other card.
-    return;
+    // The wheel is the zoom while the cursor is on the strip, and the strip keeps it: the page
+    // underneath stays put. Scrolling up (negative delta) magnifies, matching the zoom-in button
+    // and the map, because here the span — not the camera scale — is the zoom level.
+    const factor = Math.exp(event.deltaY * unit * WHEEL_ZOOM_SENSITIVITY);
+    setRange(
+      zoomTimelineRangeAt(range.value, span.value * factor, fraction, boundsNow(), minSpan.value),
+    );
   }
 
   interacting.value = true;
@@ -577,9 +575,8 @@ onBeforeUnmount(clearCommitTimer);
     </div>
 
     <p :id="helpId" class="sr-only">
-      Drag to pan through time, pinch or hold Ctrl or Command while scrolling to zoom, and click or
-      drag the playhead to select a recorded moment. Shift and the arrow keys pan, and plus and
-      minus zoom.
+      Drag to pan through time, scroll to zoom, and click to select a recorded moment. Shift and the
+      arrow keys pan, and plus and minus zoom.
     </p>
 
     <!-- The strip itself: one column per observation, plus the playhead. -->
