@@ -133,9 +133,12 @@ export interface MetaResponse {
   history: {
     retentionDays: number;
     sampleIntervalSeconds: number;
-    /** Persisted, UI-controlled cadence for wayback position recording. */
+    /**
+     * Cadence wayback position recording is running at, from
+     * `PALSENTRY_WAYBACK_INTERVAL_SECONDS`. Read-only for the SPA: it explains how dense a replay
+     * can be, and how fast a running recorder adds new observations.
+     */
     waybackIntervalSeconds: number;
-    waybackIntervalOptions: number[];
   };
   restart: {
     defaultWaitSeconds: number;
@@ -395,34 +398,26 @@ export interface HistoryResponse {
 // ---------------------------------------------------------------------------
 
 /**
- * Selectable position-recording cadences, in seconds.
+ * Bounds for the wayback position-recording cadence, in seconds.
  *
- * Five seconds is the smoothest trail worth offering: every sample is a `/players` request the
- * game server has to serve, and each one is stored for the whole retention window. Five minutes
- * is the coarsest that still reads as movement rather than a series of unrelated points.
+ * Five seconds is the finest interval worth offering: every sample is a `/players` request the
+ * game server has to serve, and each one is stored for the whole retention window. An hour is the
+ * coarsest that still reads as movement rather than a series of unrelated points.
  */
-export const WAYBACK_INTERVAL_OPTIONS: readonly number[] = [5, 15, 30, 60, 300];
+export const MIN_WAYBACK_INTERVAL_SECONDS = 5;
+export const MAX_WAYBACK_INTERVAL_SECONDS = 3_600;
 
-/** Matches the historic `PALSENTRY_SAMPLE_INTERVAL_SECONDS` default, so upgrades change nothing. */
-export const DEFAULT_WAYBACK_INTERVAL_SECONDS = 60;
+/**
+ * Default recording cadence.
+ *
+ * Five seconds makes a short chase legible on the map, which is the reason wayback exists; the
+ * interval is deployment configuration, so an operator who values database size over detail can
+ * raise it without touching the code.
+ */
+export const DEFAULT_WAYBACK_INTERVAL_SECONDS = MIN_WAYBACK_INTERVAL_SECONDS;
 
 /** Wayback opens on the last day: long enough to cover a session, small enough to draw. */
 export const DEFAULT_WAYBACK_WINDOW: HistoryWindow = '24h';
-
-/** True when `value` is one of the cadences the server accepts. */
-export function isWaybackInterval(value: number): boolean {
-  return WAYBACK_INTERVAL_OPTIONS.includes(value);
-}
-
-/** The persisted recording cadence, and the values the UI may set it to. */
-export interface WaybackSettingsResponse {
-  intervalSeconds: number;
-  intervalOptions: number[];
-}
-
-export interface WaybackSettingsRequest {
-  intervalSeconds: number;
-}
 
 /**
  * One successful background observation.

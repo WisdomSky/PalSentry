@@ -181,9 +181,9 @@ export interface PlayerSnapshot {
  * twice from two slightly different snapshots.
  *
  * It deliberately owns no timer. Scheduling belongs to whoever needs the data at an interval:
- * today that is `PlayerHistoryService`, which reschedules when the operator changes the recording
- * cadence and records what each of its observations saw. Adding a timer here as well would mean
- * two readers sampling the same endpoint on two independent schedules.
+ * today that is `PlayerHistoryService`, which records what each of its observations saw on the
+ * wayback recording cadence. Adding a timer here as well would mean two readers sampling the same
+ * endpoint on two independent schedules.
  */
 export class PlayerService {
   private readonly roster: PlayerRoster;

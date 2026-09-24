@@ -301,7 +301,9 @@ describe('wayback position history', () => {
     const settings = upgraded
       .prepare('SELECT interval_seconds AS seconds FROM wayback_settings WHERE id = 1')
       .get() as { seconds: number };
-    assert.equal(settings.seconds, 60, 'the recording cadence starts at the documented default');
+    // The cadence moved to PALSENTRY_WAYBACK_INTERVAL_SECONDS, so this row is a historical
+    // artifact: it survives the upgrade but no longer decides how often positions are recorded.
+    assert.equal(settings.seconds, 60, 'the legacy cadence row is preserved as written');
 
     runMigrations(upgraded, logger);
     assert.equal(getSchemaVersion(upgraded), SCHEMA_VERSION, 're-running applies nothing');

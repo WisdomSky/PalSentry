@@ -3,6 +3,7 @@ export * from './contract.js';
 export * from './settings.js';
 export * from './map.js';
 export * from './chart.js';
+export * from './timeline.js';
 export * from './player-sort.js';
 
 /** Polling cadence the dashboard defaults to, in milliseconds. */

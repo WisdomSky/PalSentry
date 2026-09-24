@@ -175,7 +175,7 @@ The same is true of `/players`, which lists only who is connected at the moment 
 
 ## Players
 
-**Players** lists everyone PalSentry has ever seen, not just who is connected right now. Palworld's `/players` endpoint forgets a player the moment they disconnect, so the roster is PalSentry's own table, observed in the background at `PALSENTRY_SAMPLE_INTERVAL_SECONDS` (60s by default) — players who connect and leave between two page views are still recorded.
+**Players** lists everyone PalSentry has ever seen, not just who is connected right now. Palworld's `/players` endpoint forgets a player the moment they disconnect, so the roster is PalSentry's own table, observed in the background at `PALSENTRY_WAYBACK_INTERVAL_SECONDS` (5s by default) — players who connect and leave between two page views are still recorded.
 
 Each row carries a **Last online** column, immediately before the actions:
 

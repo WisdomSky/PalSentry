@@ -218,74 +218,32 @@ describe('PlayerHistoryService recording', () => {
 // ---------------------------------------------------------------------------
 
 describe('PlayerHistoryService cadence', () => {
-  it('starts at the default interval', async () => {
+  it('records every five seconds by default', async () => {
     const testApp = await newApp();
-    assert.equal(testApp.ctx.playerHistory.intervalSeconds, DEFAULT_WAYBACK_INTERVAL_SECONDS);
+    assert.equal(testApp.ctx.playerHistory.intervalSeconds, 5);
+    assert.equal(DEFAULT_WAYBACK_INTERVAL_SECONDS, 5);
   });
 
-  it('refuses a cadence that is not offered, and keeps the old one', async () => {
-    const testApp = await newApp();
-    const { ctx } = testApp;
-
-    assert.throws(() => ctx.playerHistory.setIntervalSeconds(7), RangeError);
-    assert.equal(ctx.playerHistory.intervalSeconds, DEFAULT_WAYBACK_INTERVAL_SECONDS);
-
-    const stored = ctx.db
-      .prepare('SELECT interval_seconds AS seconds FROM wayback_settings WHERE id = 1')
-      .get() as { seconds: number };
-    assert.equal(stored.seconds, DEFAULT_WAYBACK_INTERVAL_SECONDS);
+  it('takes the cadence from the environment', async () => {
+    const testApp = await newApp({ PALSENTRY_WAYBACK_INTERVAL_SECONDS: '30' });
+    assert.equal(testApp.ctx.playerHistory.intervalSeconds, 30);
   });
 
-  it('persists a change across a restart', async () => {
+  it('ignores a cadence persisted by an older release', async () => {
     const dbPath = tempDbPath();
+    // A database written before the cadence moved to the environment still carries its old row.
+    // The environment wins, so an upgrade cannot silently keep recording at the old rate.
     const first = await newApp({ PALSENTRY_DB_PATH: dbPath });
-    assert.equal(first.ctx.playerHistory.setIntervalSeconds(15), 15);
-
-    // A second app on the same file is what a container restart looks like.
-    const second = await newApp({ PALSENTRY_DB_PATH: dbPath });
-    assert.equal(second.ctx.playerHistory.intervalSeconds, 15);
-  });
-
-  it('repairs a stored cadence the UI cannot offer', async () => {
-    const dbPath = tempDbPath();
-    const first = await newApp({ PALSENTRY_DB_PATH: dbPath });
-    first.ctx.db.prepare('UPDATE wayback_settings SET interval_seconds = 7 WHERE id = 1').run();
+    first.ctx.db.prepare('UPDATE wayback_settings SET interval_seconds = 300 WHERE id = 1').run();
+    await first.close();
 
     const second = await newApp({ PALSENTRY_DB_PATH: dbPath });
-    // Left in place, an unoffered value could not be shown as selected in the UI, so the operator
-    // would have no way to see or correct it.
-    assert.equal(second.ctx.playerHistory.intervalSeconds, DEFAULT_WAYBACK_INTERVAL_SECONDS);
+    assert.equal(second.ctx.playerHistory.intervalSeconds, 5);
+
     const stored = second.ctx.db
       .prepare('SELECT interval_seconds AS seconds FROM wayback_settings WHERE id = 1')
       .get() as { seconds: number };
-    assert.equal(stored.seconds, DEFAULT_WAYBACK_INTERVAL_SECONDS);
-  });
-
-  it('reschedules the single running timer', async () => {
-    const testApp = await newApp();
-    const { ctx } = testApp;
-    // The timer is deliberately not exposed as public API; reaching for it is the only way to
-    // assert the schedule was replaced rather than joined by a second one.
-    const internals = ctx.playerHistory as unknown as { sampleTimer: NodeJS.Timeout | null };
-
-    try {
-      await ctx.playerHistory.start();
-      assert.equal(snapshotCount(ctx), 1, 'starting records the first observation');
-      const before = internals.sampleTimer;
-      assert.ok(before !== null);
-
-      ctx.playerHistory.setIntervalSeconds(15);
-      const after = internals.sampleTimer;
-      assert.ok(after !== null, 'the recorder is still running');
-      assert.notEqual(after, before, 'a fresh countdown replaced the old schedule');
-
-      ctx.playerHistory.setIntervalSeconds(30);
-      assert.notEqual(internals.sampleTimer, after, 'and again for the next change');
-    } finally {
-      await ctx.playerHistory.stop();
-    }
-
-    assert.equal(internals.sampleTimer, null);
+    assert.equal(stored.seconds, 300, 'the legacy row is left untouched');
   });
 
   it('does not schedule anything until it is started', async () => {
@@ -293,8 +251,7 @@ describe('PlayerHistoryService cadence', () => {
     const { ctx } = testApp;
     const internals = ctx.playerHistory as unknown as { sampleTimer: NodeJS.Timeout | null };
 
-    ctx.playerHistory.setIntervalSeconds(5);
-    assert.equal(internals.sampleTimer, null, 'changing the cadence alone starts no timer');
+    assert.equal(internals.sampleTimer, null);
     assert.equal(snapshotCount(ctx), 0);
   });
 });
@@ -331,7 +288,7 @@ describe('PlayerHistoryService history', () => {
 
     const history = ctx.playerHistory.history('1h', NOW_MS);
 
-    assert.equal(history.bucketSeconds, 60);
+    assert.equal(history.bucketSeconds, 60, 'preset windows keep their chart buckets');
     assert.equal(history.snapshots.length, 1, 'one tick per bucket');
     assert.equal(history.snapshots[0]?.ts, BASE + 20, 'the tick names a real observation');
     assert.equal(history.snapshots[0]?.playerCount, 1);
@@ -339,6 +296,57 @@ describe('PlayerHistoryService history', () => {
     const alice = history.players[0];
     assert.equal(alice?.points.length, 1);
     assert.deepEqual(alice?.points[0], { ts: BASE + 20, x: 3, y: 3 });
+  });
+
+  it('reveals second-level detail when a custom range is zoomed in', async () => {
+    const testApp = await newApp();
+    const { ctx } = testApp;
+
+    observeAt(ctx, BASE, 0, [player('USER-A', 'Alice', 1, 1)]);
+    observeAt(ctx, BASE, 5, [player('USER-A', 'Alice', 2, 2)]);
+    observeAt(ctx, BASE, 10, [player('USER-A', 'Alice', 3, 3)]);
+    observeAt(ctx, BASE, 15, [player('USER-A', 'Alice', 4, 4)]);
+
+    // A one-minute view of a five-second cadence: twelve observations fit the point cap easily,
+    // so the timeline is expected to expose each one rather than folding them into 60s columns.
+    const history = ctx.playerHistory.history({ kind: 'range', from: BASE, to: BASE + 60 });
+
+    assert.equal(history.bucketSeconds, 5, 'the bucket is one cadence step');
+    assert.deepEqual(
+      history.snapshots.map((snapshot) => snapshot.ts),
+      [BASE, BASE + 5, BASE + 10, BASE + 15],
+      'each observation is its own tick',
+    );
+    assert.deepEqual(
+      history.players[0]?.points.map((point) => point.x),
+      [1, 2, 3, 4],
+    );
+  });
+
+  it('coarsens a custom range only as far as the point cap requires', async () => {
+    const testApp = await newApp();
+    const { ctx } = testApp;
+
+    // An hour of five-second observations is 720 instants: twice the cap, so the bucket must be a
+    // cadence multiple that brings the response back under it.
+    const hour = ctx.playerHistory.history({ kind: 'range', from: BASE, to: BASE + 3_600 });
+    assert.equal(hour.bucketSeconds, 10);
+    assert.ok(Math.ceil(3_600 / hour.bucketSeconds) <= 360);
+
+    const day = ctx.playerHistory.history({ kind: 'range', from: BASE, to: BASE + 86_400 });
+    assert.ok(day.bucketSeconds % 5 === 0, 'wide ranges still bucket on cadence multiples');
+    assert.ok(Math.ceil(86_400 / day.bucketSeconds) <= 360);
+  });
+
+  it('honours a coarser configured cadence in a zoomed custom range', async () => {
+    const testApp = await newApp({ PALSENTRY_WAYBACK_INTERVAL_SECONDS: '60' });
+    const { ctx } = testApp;
+
+    const history = ctx.playerHistory.history({ kind: 'range', from: BASE, to: BASE + 60 });
+
+    // No bucket can be finer than the observations it has to describe, so a 60-second cadence
+    // yields one bucket here even though the point cap would allow twelve.
+    assert.equal(history.bucketSeconds, 60);
   });
 
   it('leaves a gap where no observations were recorded', async () => {
@@ -471,14 +479,20 @@ describe('player history API', () => {
 
     const history = await testApp.app.inject({ method: 'GET', url: '/api/player-history' });
     assert.equal(history.statusCode, 401);
+  });
 
-    const settings = await testApp.app.inject({
+  it('has no cadence endpoint: the interval is deployment configuration', async () => {
+    const testApp = await newApp();
+    const cookie = await signIn(testApp.app);
+
+    const response = await testApp.app.inject({
       method: 'PUT',
       url: '/api/player-history/settings',
-      headers: { 'content-type': 'application/json' },
+      headers: { cookie, 'content-type': 'application/json' },
       payload: { intervalSeconds: 15 },
     });
-    assert.equal(settings.statusCode, 401);
+
+    assert.equal(response.statusCode, 404);
   });
 
   it('serves the last day by default', async () => {
@@ -533,9 +547,11 @@ describe('player history API', () => {
   });
 
   it('reports the effective cadence in /meta', async () => {
-    const testApp = await newApp({ PALSENTRY_HISTORY_RETENTION_DAYS: '7' });
+    const testApp = await newApp({
+      PALSENTRY_HISTORY_RETENTION_DAYS: '7',
+      PALSENTRY_WAYBACK_INTERVAL_SECONDS: '30',
+    });
     const cookie = await signIn(testApp.app);
-    testApp.ctx.playerHistory.setIntervalSeconds(30);
 
     const response = await testApp.app.inject({
       method: 'GET',
@@ -544,85 +560,14 @@ describe('player history API', () => {
     });
 
     const body = response.json() as {
-      history: {
-        retentionDays: number;
-        waybackIntervalSeconds: number;
-        waybackIntervalOptions: number[];
-      };
+      history: { retentionDays: number; waybackIntervalSeconds: number };
     };
     assert.equal(body.history.retentionDays, 7);
     assert.equal(body.history.waybackIntervalSeconds, 30);
-    assert.deepEqual(body.history.waybackIntervalOptions, [5, 15, 30, 60, 300]);
-  });
-
-  it('changes the cadence and records who changed it', async () => {
-    const testApp = await newApp();
-    const cookie = await signIn(testApp.app);
-
-    const response = await testApp.app.inject({
-      method: 'PUT',
-      url: '/api/player-history/settings',
-      headers: { cookie, 'content-type': 'application/json' },
-      payload: { intervalSeconds: 5 },
-    });
-
-    assert.equal(response.statusCode, 200);
-    assert.deepEqual(response.json(), {
-      intervalSeconds: 5,
-      intervalOptions: [5, 15, 30, 60, 300],
-    });
-    assert.equal(testApp.ctx.playerHistory.intervalSeconds, 5);
-
-    const entries = testApp.ctx.audit.list().entries;
-    assert.equal(entries.length, 1);
-    assert.equal(entries[0]?.action, 'wayback-interval');
-    assert.deepEqual(entries[0]?.payload, { fromSeconds: 60, toSeconds: 5 });
-    assert.equal(entries[0]?.ok, true);
-  });
-
-  it('does not audit a save that changes nothing', async () => {
-    const testApp = await newApp();
-    const cookie = await signIn(testApp.app);
-
-    const response = await testApp.app.inject({
-      method: 'PUT',
-      url: '/api/player-history/settings',
-      headers: { cookie, 'content-type': 'application/json' },
-      payload: { intervalSeconds: DEFAULT_WAYBACK_INTERVAL_SECONDS },
-    });
-
-    assert.equal(response.statusCode, 200);
-    assert.equal(testApp.ctx.audit.list().entries.length, 0);
-  });
-
-  it('rejects a cadence the recorder does not offer', async () => {
-    const testApp = await newApp();
-    const cookie = await signIn(testApp.app);
-
-    const response = await testApp.app.inject({
-      method: 'PUT',
-      url: '/api/player-history/settings',
-      headers: { cookie, 'content-type': 'application/json' },
-      payload: { intervalSeconds: 7 },
-    });
-
-    assert.equal(response.statusCode, 400);
-    const body = response.json() as { error: { fields?: Record<string, string> } };
-    assert.match(body.error.fields?.intervalSeconds ?? '', /5, 15, 30, 60, 300/);
-    assert.equal(testApp.ctx.playerHistory.intervalSeconds, DEFAULT_WAYBACK_INTERVAL_SECONDS);
-  });
-
-  it('requires a JSON content type for a cadence change', async () => {
-    const testApp = await newApp();
-    const cookie = await signIn(testApp.app);
-
-    const response = await testApp.app.inject({
-      method: 'PUT',
-      url: '/api/player-history/settings',
-      headers: { cookie, 'content-type': 'text/plain' },
-      payload: JSON.stringify({ intervalSeconds: 15 }),
-    });
-
-    assert.equal(response.statusCode, 415);
+    assert.equal(
+      Object.hasOwn(body.history, 'waybackIntervalOptions'),
+      false,
+      'the SPA cannot choose the cadence, so /meta does not offer options',
+    );
   });
 });

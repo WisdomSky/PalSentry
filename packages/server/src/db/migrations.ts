@@ -119,9 +119,11 @@ const MIGRATIONS: readonly Migration[] = [
     name: 'wayback player position history',
     up: (db) => {
       db.exec(`
-        -- Persisted recording cadence for wayback position sampling. A single row (id = 1) rather
-        -- than a key/value table: there is exactly one interval, and the CHECK keeps a buggy
-        -- writer from parking an absurd cadence in the database.
+        -- Persisted recording cadence for wayback position sampling, from when the cadence was a
+        -- dashboard setting. The cadence is now deployment configuration
+        -- (PALSENTRY_WAYBACK_INTERVAL_SECONDS), so nothing reads or writes this table; it is kept
+        -- so an already-migrated database does not have to be rewritten. The single row (id = 1)
+        -- and its CHECK remain as the historical shape.
         CREATE TABLE wayback_settings (
           id               INTEGER PRIMARY KEY CHECK (id = 1),
           interval_seconds INTEGER NOT NULL CHECK (interval_seconds > 0),

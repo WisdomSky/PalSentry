@@ -182,15 +182,6 @@ async function postJson(url, body) {
   return { status: response.status, body: await response.json().catch(() => null) };
 }
 
-async function putJson(url, body) {
-  const response = await fetch(url, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...CLOSE },
-    body: JSON.stringify(body),
-  });
-  return { status: response.status, body: await response.json().catch(() => null) };
-}
-
 async function readLogLines(logPath) {
   if (!existsSync(logPath)) return [];
 
@@ -599,8 +590,10 @@ const child = spawn(
   {
     env: {
       ...process.env,
-      // Fast cadences: the defaults are a minute, which would make this a very slow test.
+      // Fast cadences: the defaults are a minute for metrics and five seconds for position
+      // recording, and this test wants both to move quickly.
       PALSENTRY_SAMPLE_INTERVAL_SECONDS: '5',
+      PALSENTRY_WAYBACK_INTERVAL_SECONDS: '5',
       ...(feed === null ? {} : { PALSENTRY_UPDATE_FEED: feed.url }),
     },
     stdio: 'ignore',
@@ -801,10 +794,6 @@ try {
       meta.body?.app?.authEnabled === false,
       'desktop mode must not ask for a PalSentry login',
     );
-
-    // The recording cadence defaults to a minute; the desktop settings endpoint drives the position
-    // sampler, so shorten it for the test.
-    await putJson(`${origin}/api/player-history/settings`, { intervalSeconds: 5 });
 
     await waitFor('metric samples', () => tableCount(databasePath, 'metric_samples') >= 1, {
       timeoutMs: 60_000,
